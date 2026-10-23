@@ -18,7 +18,7 @@
 /* §4 Record */
 #define WS_RECORD_SIZE 20u
 #define WS_RECORD_CRC_OFFSET 19u
-#define WS_WINDOW_SAMPLES 60u /* 1 Hz samples per 1-minute aggregate */
+#define WS_WINDOW_SAMPLES 60u /* most samples a 1-minute aggregate may contain (1 Hz) */
 
 #define WS_TEMP_MIN (-5500)          /* -55.00 °C */
 #define WS_TEMP_MAX 15000            /* 150.00 °C */

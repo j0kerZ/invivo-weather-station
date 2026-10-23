@@ -19,13 +19,16 @@ this document disagree, that is a bug.
 ## 2. Sampling decision
 
 The interviewers clarified that the sensors "respond within a few milliseconds" and that the
-sampling rate (up to ~100 Hz) is our choice. We choose **1 Hz acquisition, aggregated to one
+sampling rate (up to ~100 Hz) is our choice. We choose **one sample every 2 s, aggregated to one
 record per minute, plus immediate event records**:
 
 - **The sensors do not produce new information at 100 Hz.** The LM92 datasheet gives a temperature
-  conversion time of 500 ms typical, and states that reading faster than the conversion time
-  returns the previous result. TI lists the HDC3020 humidity response time as about 4 s.
+  conversion time of 500 ms typical and 1000 ms maximum, and states that reading faster than the
+  conversion time prevents the data from being updated. Polling at 1 Hz would sit exactly on that
+  limit, so we poll every 2 s. TI lists the HDC3020 humidity response time as about 4 s.
   The I²C read takes milliseconds, but the measurement itself does not.
+- The protocol allows up to 60 samples per window (1 Hz), so a faster sensor can be used later
+  without a protocol change.
 - **Air temperature and humidity inside a radiation shield change over seconds to minutes.**
   Irrigation decisions are made on minutes-to-hours data.
 - **Cost scales with message rate.** One message per second is 60× the IoT messages, Lambda
@@ -33,7 +36,7 @@ record per minute, plus immediate event records**:
 - **Storage:** raw 1 Hz data for a year is about 315 MB per station; 1-minute aggregates are about
   10.5 MB (§6).
 
-The 1 Hz samples are not discarded silently: each minute keeps **min, mean and max** for both
+The individual samples are not discarded silently: each minute keeps **min, mean and max** for both
 quantities, so short extremes (for example a frost dip) survive aggregation.
 
 ## 3. Conventions
@@ -63,8 +66,8 @@ on the wire, so the device copies stored records into a frame without re-encodin
 | 10 | 2 | u16 | `rh_mean` | Mean relative humidity, 0.01 %RH |
 | 12 | 2 | u16 | `rh_min` | Minimum relative humidity |
 | 14 | 2 | u16 | `rh_max` | Maximum relative humidity |
-| 16 | 1 | u8 | `n_temp` | Number of valid temperature samples in the window (0…60; 1 for an event) |
-| 17 | 1 | u8 | `n_rh` | Number of valid humidity samples in the window (0…60; 1 for an event) |
+| 16 | 1 | u8 | `n_temp` | Valid temperature samples in the window (0…60; 30 at the current 2 s rate; 1 for an event) |
+| 17 | 1 | u8 | `n_rh` | Valid humidity samples in the window (0…60; 30 at the current 2 s rate; 1 for an event) |
 | 18 | 1 | u8 | `flags` | See below |
 | 19 | 1 | u8 | `crc8` | CRC-8 over bytes 0…18 |
 
@@ -87,10 +90,14 @@ on the wire, so the device copies stored records into a frame without re-encodin
 
 **Event triggers (device configuration, not part of the wire format)**
 
-- Temperature crosses a threshold (default: falling to ≤ 1.00 °C or rising back above it, for frost
-  protection).
-- Temperature changes by ≥ 1.00 °C, or humidity by ≥ 5.00 %RH, since the last published value.
+- Frost: temperature falls to ≤ 1.00 °C, and later rises back to ≥ 1.50 °C. The 0.50 °C
+  hysteresis stops a reading hovering around 1 °C from producing an event every sample.
+- Temperature changes by ≥ 1.00 °C, or humidity by ≥ 5.00 %RH, since the last published value
+  (the previous event, or the mean of the previous aggregate).
 - At most one event per 10 s, so a noisy sensor cannot flood the link or the flash.
+- Triggers are evaluated against the last *published* state on every sample. An event suppressed by
+  the rate limit is therefore sent on the first sample after the limit expires, if the condition
+  still holds, without a queue of pending events.
 
 ## 5. Frame (MQTT payload)
 
@@ -154,6 +161,10 @@ flash, because a year of useful data does not fit in Cortex-M3 internal flash (t
 ## 8. Sequence numbers
 
 - 32-bit, per station, strictly increasing, shared by aggregates and events.
+- **Sequence order is publish order, not measurement order.** An aggregate is published when its
+  minute ends, so an event at 13:00:34 gets a lower sequence number than the 13:00 aggregate
+  published at 13:01:00. Consumers order readings by `ts` and use `seq` only for duplicate and gap
+  detection.
 - Survives reboots: on boot the device scans flash for the highest stored sequence number.
 - At one record per minute plus events, 2³² does not wrap within the product's lifetime.
 
