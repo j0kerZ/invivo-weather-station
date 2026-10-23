@@ -3,6 +3,10 @@
  *
  *   ws-emulator [--scenario normal|frost] [--hours N] [--start UNIX_TS] [--seed N]
  *               [--i2c-errors P] [--crc-errors P] [--hex] [--quiet]
+ *               [--flash FILE] [--sectors N] [--power-cut-after MINUTES]
+ *
+ * With --flash, the emulated flash is loaded from and saved to FILE, so a second run continues
+ * where the first stopped, like a station rebooting.
  */
 
 #define _POSIX_C_SOURCE 200809L /* gmtime_r */
@@ -13,11 +17,13 @@
 #include <time.h>
 
 #include "emu.h"
+#include "ws_store.h"
 
 typedef struct {
     bool hex;
     bool quiet;
-    uint32_t aggregates, events, flagged, bad_frames;
+    ws_store_t *store;
+    uint32_t aggregates, events, flagged, bad_frames, store_errors;
     size_t bytes;
 } run_t;
 
@@ -37,6 +43,14 @@ static void on_record(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SI
     size_t len = 0;
     ws_frame_t decoded;
     ws_record_t r;
+
+    /* Store first, then publish: nothing is published that a power cut could lose. */
+    if (ws_store_append(run->store, seq, record) != WS_STORE_OK) {
+        run->store_errors++;
+        if (emu_flash_is_dead()) {
+            return; /* the station has lost power: nothing is published */
+        }
+    }
 
     /* Exactly what the device would publish live: a one-record frame. Decode it as a self-check. */
     if (ws_frame_encode(0, seq, record, 1, frame, sizeof frame, &len) != WS_OK ||
@@ -89,13 +103,37 @@ static void on_record(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SI
         }
         printf("\n");
     }
+
+    /* Idle time after publishing: erase the next flash sector ahead of need. */
+    if (ws_store_service(run->store) != WS_STORE_OK) {
+        run->store_errors++;
+    }
+}
+
+/* After a reboot, continue a minute after the newest stored record. */
+static bool resume_time(const ws_store_t *store, uint32_t *start)
+{
+    uint32_t next = ws_store_next_seq(store);
+
+    /* The newest slot may be torn by a power cut, so try the one before it too. */
+    for (uint32_t back = 1; back <= 2 && back <= next - store->oldest_seq; back++) {
+        uint8_t rec[WS_RECORD_SIZE];
+        ws_record_t r;
+        if (ws_store_read(store, next - back, rec) == WS_STORE_OK &&
+            ws_record_decode(rec, &r) == WS_OK) {
+            *start = r.ts - r.ts % 60 + 60;
+            return true;
+        }
+    }
+    return false;
 }
 
 static int usage(void)
 {
     fprintf(stderr, "usage: ws-emulator [--scenario normal|frost] [--hours N] [--start UNIX_TS]\n"
                     "                   [--seed N] [--i2c-errors P] [--crc-errors P] [--hex] "
-                    "[--quiet]\n");
+                    "[--quiet]\n"
+                    "                   [--flash FILE] [--sectors N] [--power-cut-after MINUTES]\n");
     return 2;
 }
 
@@ -103,7 +141,11 @@ int main(int argc, char **argv)
 {
     emu_config_t cfg = {.scenario = EMU_SCENARIO_NORMAL, .seed = 1};
     uint32_t start = 1792713600u; /* 2026-10-23T00:00:00Z */
+    bool start_given = false;
     double hours = 24.0;
+    const char *flash_path = NULL;
+    uint32_t sectors = WS_STORE_SECTORS_16MB;
+    double cut_minutes = -1.0;
     run_t run = {0};
 
     for (int i = 1; i < argc; i++) {
@@ -132,6 +174,13 @@ int main(int argc, char **argv)
             hours = atof(val);
         } else if (strcmp(arg, "--start") == 0) {
             start = (uint32_t)strtoul(val, NULL, 10);
+            start_given = true;
+        } else if (strcmp(arg, "--flash") == 0) {
+            flash_path = val;
+        } else if (strcmp(arg, "--sectors") == 0) {
+            sectors = (uint32_t)strtoul(val, NULL, 10);
+        } else if (strcmp(arg, "--power-cut-after") == 0) {
+            cut_minutes = atof(val);
         } else if (strcmp(arg, "--seed") == 0) {
             cfg.seed = strtoull(val, NULL, 10);
         } else if (strcmp(arg, "--i2c-errors") == 0) {
@@ -146,19 +195,65 @@ int main(int argc, char **argv)
         return usage();
     }
 
+    /* Boot: mount the flash log, which also recovers the next sequence number. */
+    ws_store_t store;
+    emu_flash_init(sectors);
+    if (flash_path != NULL && emu_flash_load(flash_path)) {
+        fprintf(stderr, "flash: loaded %s\n", flash_path);
+    }
+    if (ws_store_mount(&store, sectors, 1) != WS_STORE_OK) {
+        fprintf(stderr, "flash: mount failed\n");
+        return 1;
+    }
+    if (!start_given && resume_time(&store, &start)) {
+        fprintf(stderr, "flash: resuming a minute after the newest stored record\n");
+    }
+    fprintf(stderr, "flash: %lu sectors, %lu in use, next seq %lu, oldest seq %lu, "
+                    "torn records %lu\n\n",
+            (unsigned long)sectors, (unsigned long)store.valid_sectors,
+            (unsigned long)ws_store_next_seq(&store), (unsigned long)store.oldest_seq,
+            (unsigned long)store.torn_records);
+    run.store = &store;
+
     ws_station_t st;
     const ws_event_config_t events = WS_EVENT_CONFIG_DEFAULT;
     emu_init(&cfg);
-    ws_station_init(&st, 1, &events, on_record, &run);
-    emu_run(&st, start, (uint32_t)(hours * 3600.0));
+    ws_station_init(&st, ws_store_next_seq(&store), &events, on_record, &run);
+
+    uint32_t duration = (uint32_t)(hours * 3600.0);
+    if (cut_minutes >= 0 && cut_minutes * 60.0 < duration) {
+        /* Run normally, then cut the power 7 bytes into the next flash write. */
+        uint32_t before = (uint32_t)(cut_minutes * 60.0);
+        emu_run(&st, start, before);
+        emu_flash_power_cut_after(7);
+        emu_run(&st, start + before + WS_SAMPLE_PERIOD_S, duration - before);
+        fprintf(stderr, "\n*** power cut during a flash write (seq %lu) ***\n",
+                (unsigned long)(st.next_seq - 1));
+    } else {
+        emu_run(&st, start, duration);
+    }
+    if (flash_path != NULL) {
+        emu_flash_power_restore();
+        if (!emu_flash_save(flash_path)) {
+            fprintf(stderr, "flash: could not save %s\n", flash_path);
+            return 1;
+        }
+    }
 
     fprintf(stderr,
             "\n%lu aggregates, %lu events, %lu records with error flags, %lu bad frames\n"
-            "sensor read failures: temperature %lu, humidity %lu; encode errors %lu\n"
+            "sensor read failures: temperature %lu, humidity %lu; encode errors %lu; "
+            "store errors %lu\n"
             "%zu bytes as live frames (%.1f bytes per record)\n",
             (unsigned long)run.aggregates, (unsigned long)run.events, (unsigned long)run.flagged,
             (unsigned long)run.bad_frames, (unsigned long)st.temp_errors,
-            (unsigned long)st.rh_errors, (unsigned long)st.encode_errors, run.bytes,
+            (unsigned long)st.rh_errors, (unsigned long)st.encode_errors,
+            (unsigned long)run.store_errors, run.bytes,
             run.aggregates + run.events ? (double)run.bytes / (run.aggregates + run.events) : 0.0);
+    if (emu_flash_violations() != 0) {
+        fprintf(stderr, "flash: %lu NOR rule violations by the firmware\n",
+                (unsigned long)emu_flash_violations());
+        return 1;
+    }
     return run.bad_frames == 0 && st.encode_errors == 0 ? 0 : 1;
 }

@@ -1,7 +1,8 @@
-build/
+build*/
 node_modules/
 cdk.out/
 dist/
 *.bin
 .env*
 certs/
+*.flash

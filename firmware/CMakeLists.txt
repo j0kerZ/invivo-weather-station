@@ -26,11 +26,12 @@ add_library(ws_core STATIC
     src/ws_hdc3020.c
     src/ws_aggregator.c
     src/ws_station.c
+    src/ws_store.c
 )
 target_include_directories(ws_core PUBLIC include)
 
 # PC emulation of the hardware (sensors on I2C, the weather), and the command-line emulator.
-add_library(ws_emu STATIC emu/emu.c)
+add_library(ws_emu STATIC emu/emu.c emu/emu_flash.c)
 target_include_directories(ws_emu PUBLIC emu)
 target_link_libraries(ws_emu PUBLIC ws_core m)
 
@@ -54,6 +55,10 @@ add_test(NAME aggregator COMMAND test_aggregator)
 add_executable(test_emulator test/test_emulator.c)
 target_link_libraries(test_emulator PRIVATE ws_emu)
 add_test(NAME emulator COMMAND test_emulator)
+
+add_executable(test_store test/test_store.c)
+target_link_libraries(test_store PRIVATE ws_emu)
+add_test(NAME store COMMAND test_store)
 
 # The Cortex-M3 has no FPU: floating point in firmware code would pull in slow software routines.
 add_test(NAME no_floating_point_in_firmware

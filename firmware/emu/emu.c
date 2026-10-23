@@ -162,11 +162,15 @@ void emu_init(const emu_config_t *cfg)
     hdc_has_result = false;
 }
 
-void emu_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
+bool emu_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
 {
     /* `<=` so the final window is closed by the first sample of the next one. */
     for (uint32_t t = start; t - start <= duration_s; t += WS_SAMPLE_PERIOD_S) {
         now = t;
         ws_station_tick(st, t, true);
+        if (emu_flash_is_dead()) {
+            return false;
+        }
     }
+    return true;
 }

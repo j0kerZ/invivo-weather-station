@@ -22,4 +22,15 @@ bool ws_hal_i2c_write_read(uint8_t addr, const uint8_t *tx, size_t tx_len, uint8
 
 void ws_hal_delay_ms(uint32_t ms);
 
+/*
+ * SPI NOR flash. Erased bytes read 0xFF, programming can only clear bits (1 -> 0), and one
+ * program operation must stay inside a 256-byte page. Each function returns false on failure.
+ */
+#define WS_FLASH_SECTOR_SIZE 4096u
+#define WS_FLASH_PAGE_SIZE 256u
+
+bool ws_hal_flash_read(uint32_t addr, uint8_t *data, size_t len);
+bool ws_hal_flash_program(uint32_t addr, const uint8_t *data, size_t len);
+bool ws_hal_flash_erase_sector(uint32_t sector);
+
 #endif

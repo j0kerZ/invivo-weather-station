@@ -14,7 +14,7 @@ the MCU, with emulated sensors, flash and clock.
 | Binary protocol v1 ([docs/PROTOCOL.md](docs/PROTOCOL.md)) | Done |
 | C encoder/decoder with tests and shared test vectors | Done |
 | Sensor drivers, aggregation and events, PC emulator | Done |
-| Flash storage and offline recovery | Not started |
+| Flash storage with power-cut recovery | Done |
 | Publishing to AWS IoT Core | Not started |
 | Cloud ingest (Lambda, DynamoDB, IaC) | Not started |
 | Web frontend | Not started |
@@ -41,6 +41,10 @@ Runs the real firmware against emulated sensors on an emulated I²C bus, faster 
 ./build/ws-emulator --scenario frost        # a frost night: frost and thaw events
 ./build/ws-emulator --i2c-errors 0.05 --crc-errors 0.02   # a faulty sensor bus
 ./build/ws-emulator --hours 1 --hex         # also print each MQTT payload in hex
+
+# Flash persistence: cut the power mid-write, then reboot from the same flash image
+./build/ws-emulator --flash station.flash --hours 1 --power-cut-after 30
+./build/ws-emulator --flash station.flash --hours 1   # "torn records 1", continues at the next seq
 ```
 
 ```
@@ -56,17 +60,19 @@ flowchart LR
         station --> hdc["HDC3020 driver"]
         station --> agg["ws_aggregator<br/>1-min min/mean/max<br/>+ events"]
         agg --> proto["ws_protocol<br/>20-byte record"]
+        proto --> store["ws_store<br/>flash ring buffer<br/>365+ days"]
     end
-    lm92 & hdc --> hal["ws_hal.h<br/>I²C + delay"]
-    hal --> emu["PC emulator<br/>emulated chips + weather model"]
-    hal -.-> mcu["MCU I²C peripheral<br/>(real hardware)"]
-    proto --> sink["record sink<br/>flash + MQTT (next steps)"]
+    lm92 & hdc --> hal["ws_hal.h<br/>I²C, flash, delay"]
+    store --> hal
+    hal --> emu["PC emulator<br/>emulated chips, NOR flash, weather"]
+    hal -.-> mcu["MCU I²C + SPI NOR flash<br/>(real hardware)"]
+    store --> mqtt["MQTT publish<br/>(next step)"]
 ```
 
 | Path | Contents |
 |---|---|
 | `firmware/src`, `firmware/include` | Portable firmware code: no heap, no OS, no I/O, no floating point |
-| `firmware/emu` | PC-only: emulated LM92 and HDC3020, weather model, HAL, `ws-emulator` |
+| `firmware/emu` | PC-only: emulated LM92, HDC3020 and NOR flash (with power-cut injection), weather model, `ws-emulator` |
 | `firmware/test` | Unit tests, and a whole-station test over an emulated day |
 | `firmware/tools/gen_vectors.c` | Generates `protocol/vectors-v1.json` |
 | `protocol/vectors-v1.json` | Valid and malformed frames with expected decode results, shared by every decoder |

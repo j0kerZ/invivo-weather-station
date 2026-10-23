@@ -123,7 +123,7 @@ On-board SPI NOR flash is used as a circular log of 4096-byte sectors (the NOR e
 |---:|---:|---|
 | 0 | 4 | magic `"WSR1"` |
 | 4 | 4 | `seq_first` of the first record in the sector |
-| 8 | 4 | erase counter (wear monitoring) |
+| 8 | 4 | ring generation: how many times the log has wrapped (each sector is erased once per generation) |
 | 12 | 2 | reserved |
 | 14 | 2 | CRC-16 over bytes 0…13 |
 | 16 | 4080 | 204 records × 20 bytes |
@@ -139,6 +139,26 @@ On-board SPI NOR flash is used as a circular log of 4096-byte sectors (the NOR e
 
 A 16 MB part has 4096 sectors. Keeping one sector free for erase-before-write leaves
 4095 × 204 = 835,380 records: 365 days of aggregates plus room for about 850 events per day.
+
+**Write order and crash safety.** NOR flash erases a whole sector to `0xFF`, and programming can
+only clear bits. Every step below leaves flash in a state the boot scan understands:
+
+1. A record is written to flash **before** it is published, so nothing is published that a power
+   cut could lose.
+2. A record slot that is not all `0xFF` is used. A slot torn by a power cut fails its CRC-8, is
+   skipped, and its sequence number is never reused.
+3. When a sector fills, the next one is opened by writing its header. That sector was already
+   erased ahead of time, so a record write never waits for an erase (tens to hundreds of ms on
+   SPI NOR), which would eat into the 1 s latency budget.
+4. A sector without a valid header (torn header write, or erased but not yet opened) is ignored.
+
+**Boot scan.** Read every sector header (4096 × 16 bytes). The valid header with the highest
+`seq_first` is the head; scanning its slots gives the next sequence number. Sequence numbers
+therefore survive reboots without a separate counter in flash.
+
+**Wear.** Each sector is erased once per trip around the ring: about once every 1.6 years at one
+record per minute, far below the ~100,000 erase cycles NOR flash is typically rated for. The
+ring is its own wear levelling.
 
 **"Internal storage" is interpreted as on-board flash on the station's PCB**, not the MCU's own
 flash, because a year of useful data does not fit in Cortex-M3 internal flash (typically ≤ 1 MB).
