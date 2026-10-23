@@ -4,9 +4,14 @@
  *   ws-emulator [--scenario normal|frost] [--hours N] [--start UNIX_TS] [--seed N]
  *               [--i2c-errors P] [--crc-errors P] [--hex] [--quiet]
  *               [--flash FILE] [--sectors N] [--power-cut-after MINUTES]
+ *               [--mqtt STATION_ID [--certs DIR] [--speed X] [--outage AT_MIN:FOR_MIN]
+ *                [--authz-check OTHER_STATION_ID]]
  *
  * With --flash, the emulated flash is loaded from and saved to FILE, so a second run continues
  * where the first stopped, like a station rebooting.
+ *
+ * With --mqtt, the station runs in real time (or --speed times faster) and publishes to AWS IoT
+ * Core with its X.509 certificate from --certs (default: certs).
  */
 
 #define _POSIX_C_SOURCE 200809L /* gmtime_r */
@@ -17,12 +22,16 @@
 #include <time.h>
 
 #include "emu.h"
+#include "online.h"
+#include "ws_cursor.h"
 #include "ws_store.h"
+#include "ws_uplink.h"
 
 typedef struct {
     bool hex;
     bool quiet;
     ws_store_t *store;
+    ws_uplink_t *uplink; /* NULL when not publishing */
     uint32_t aggregates, events, flagged, bad_frames, store_errors;
     size_t bytes;
 } run_t;
@@ -50,6 +59,9 @@ static void on_record(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SI
         if (emu_flash_is_dead()) {
             return; /* the station has lost power: nothing is published */
         }
+    }
+    if (run->uplink != NULL) {
+        ws_uplink_record_stored(run->uplink, seq, record); /* published now if connected */
     }
 
     /* Exactly what the device would publish live: a one-record frame. Decode it as a self-check. */
@@ -133,7 +145,10 @@ static int usage(void)
     fprintf(stderr, "usage: ws-emulator [--scenario normal|frost] [--hours N] [--start UNIX_TS]\n"
                     "                   [--seed N] [--i2c-errors P] [--crc-errors P] [--hex] "
                     "[--quiet]\n"
-                    "                   [--flash FILE] [--sectors N] [--power-cut-after MINUTES]\n");
+                    "                   [--flash FILE] [--sectors N] [--power-cut-after MINUTES]\n"
+                    "                   [--mqtt STATION_ID [--certs DIR] [--speed X] "
+                    "[--outage AT_MIN:FOR_MIN]\n"
+                    "                    [--authz-check OTHER_STATION_ID]]\n");
     return 2;
 }
 
@@ -143,10 +158,15 @@ int main(int argc, char **argv)
     uint32_t start = 1792713600u; /* 2026-10-23T00:00:00Z */
     bool start_given = false;
     double hours = 24.0;
+    bool hours_given = false;
     const char *flash_path = NULL;
+    online_config_t online = {.certs_dir = "certs", .speed = 1.0, .outage_at_min = -1.0};
+    const char *authz_other = NULL;
     uint32_t sectors = WS_STORE_SECTORS_16MB;
     double cut_minutes = -1.0;
     run_t run = {0};
+
+    setvbuf(stdout, NULL, _IOLBF, 0); /* keep records and status messages in order */
 
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
@@ -172,6 +192,7 @@ int main(int argc, char **argv)
             }
         } else if (strcmp(arg, "--hours") == 0) {
             hours = atof(val);
+            hours_given = true;
         } else if (strcmp(arg, "--start") == 0) {
             start = (uint32_t)strtoul(val, NULL, 10);
             start_given = true;
@@ -181,6 +202,18 @@ int main(int argc, char **argv)
             sectors = (uint32_t)strtoul(val, NULL, 10);
         } else if (strcmp(arg, "--power-cut-after") == 0) {
             cut_minutes = atof(val);
+        } else if (strcmp(arg, "--mqtt") == 0) {
+            online.station_id = val;
+        } else if (strcmp(arg, "--certs") == 0) {
+            online.certs_dir = val;
+        } else if (strcmp(arg, "--speed") == 0) {
+            online.speed = atof(val);
+        } else if (strcmp(arg, "--outage") == 0) {
+            if (sscanf(val, "%lf:%lf", &online.outage_at_min, &online.outage_min) != 2) {
+                return usage();
+            }
+        } else if (strcmp(arg, "--authz-check") == 0) {
+            authz_other = val;
         } else if (strcmp(arg, "--seed") == 0) {
             cfg.seed = strtoull(val, NULL, 10);
         } else if (strcmp(arg, "--i2c-errors") == 0) {
@@ -191,29 +224,51 @@ int main(int argc, char **argv)
             return usage();
         }
     }
-    if (hours <= 0 || hours > 24 * 400) {
+    if (online.station_id != NULL && !hours_given) {
+        hours = 10.0 / 60.0; /* online runs are real time: 10 minutes by default */
+    }
+    if (hours <= 0 || hours > 24 * 400 || online.speed <= 0) {
         return usage();
     }
 
-    /* Boot: mount the flash log, which also recovers the next sequence number. */
+    /* Boot: mount the flash log (which recovers the next sequence number) and the upload
+     * cursor, which occupies the last two sectors. */
     ws_store_t store;
+    ws_cursor_t cursor;
+    uint32_t store_sectors = sectors - WS_CURSOR_SECTORS;
     emu_flash_init(sectors);
     if (flash_path != NULL && emu_flash_load(flash_path)) {
         fprintf(stderr, "flash: loaded %s\n", flash_path);
     }
-    if (ws_store_mount(&store, sectors, 1) != WS_STORE_OK) {
+    if (sectors <= WS_CURSOR_SECTORS + 1 || ws_store_mount(&store, store_sectors, 1) != WS_STORE_OK ||
+        !ws_cursor_mount(&cursor, store_sectors)) {
         fprintf(stderr, "flash: mount failed\n");
         return 1;
     }
-    if (!start_given && resume_time(&store, &start)) {
+    if (online.station_id != NULL) {
+        if (!start_given) {
+            start = (uint32_t)time(NULL) / WS_SAMPLE_PERIOD_S * WS_SAMPLE_PERIOD_S; /* real time */
+        }
+    } else if (!start_given && resume_time(&store, &start)) {
         fprintf(stderr, "flash: resuming a minute after the newest stored record\n");
     }
     fprintf(stderr, "flash: %lu sectors, %lu in use, next seq %lu, oldest seq %lu, "
-                    "torn records %lu\n\n",
+                    "torn records %lu, uploaded through %s%lu\n\n",
             (unsigned long)sectors, (unsigned long)store.valid_sectors,
             (unsigned long)ws_store_next_seq(&store), (unsigned long)store.oldest_seq,
-            (unsigned long)store.torn_records);
+            (unsigned long)store.torn_records, cursor.has_value ? "#" : "(none) ",
+            (unsigned long)(cursor.has_value ? cursor.value : 0));
     run.store = &store;
+
+    if (online.station_id != NULL) {
+        run.uplink = online_init(&online, &store, &cursor);
+        if (run.uplink == NULL) {
+            return 1;
+        }
+        if (authz_other != NULL) {
+            return online_authz_check(authz_other);
+        }
+    }
 
     ws_station_t st;
     const ws_event_config_t events = WS_EVENT_CONFIG_DEFAULT;
@@ -221,7 +276,10 @@ int main(int argc, char **argv)
     ws_station_init(&st, ws_store_next_seq(&store), &events, on_record, &run);
 
     uint32_t duration = (uint32_t)(hours * 3600.0);
-    if (cut_minutes >= 0 && cut_minutes * 60.0 < duration) {
+    int online_result = 0;
+    if (run.uplink != NULL) {
+        online_result = online_run(&st, start, duration);
+    } else if (cut_minutes >= 0 && cut_minutes * 60.0 < duration) {
         /* Run normally, then cut the power 7 bytes into the next flash write. */
         uint32_t before = (uint32_t)(cut_minutes * 60.0);
         emu_run(&st, start, before);
@@ -255,5 +313,5 @@ int main(int argc, char **argv)
                 (unsigned long)emu_flash_violations());
         return 1;
     }
-    return run.bad_frames == 0 && st.encode_errors == 0 ? 0 : 1;
+    return run.bad_frames == 0 && st.encode_errors == 0 && online_result == 0 ? 0 : 1;
 }

@@ -27,16 +27,43 @@ add_library(ws_core STATIC
     src/ws_aggregator.c
     src/ws_station.c
     src/ws_store.c
+    src/ws_cursor.c
+    src/ws_uplink.c
 )
 target_include_directories(ws_core PUBLIC include)
+
+# coreMQTT: AWS's MQTT client for microcontrollers, pinned to a release. Third-party code (SOUP)
+# is used as released, so our warning flags are not applied to it.
+include(FetchContent)
+FetchContent_Declare(coremqtt
+    GIT_REPOSITORY https://github.com/FreeRTOS/coreMQTT.git
+    GIT_TAG v5.0.2
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR cmake-not-used) # fetch only: its own targets would spread its sources to ours
+FetchContent_MakeAvailable(coremqtt)
+include(${coremqtt_SOURCE_DIR}/mqttFilePaths.cmake)
+add_library(coremqtt STATIC ${MQTT_SOURCES} ${MQTT_SERIALIZER_SOURCES})
+target_include_directories(coremqtt SYSTEM PUBLIC ${MQTT_INCLUDE_PUBLIC_DIRS})
+target_compile_definitions(coremqtt PUBLIC MQTT_DO_NOT_USE_CUSTOM_CONFIG)
+target_compile_options(coremqtt PRIVATE -w)
+
+# Portable MQTT adapter (would also run on the station).
+add_library(ws_mqtt STATIC src/ws_mqtt.c)
+target_link_libraries(ws_mqtt PUBLIC ws_core coremqtt)
 
 # PC emulation of the hardware (sensors on I2C, the weather), and the command-line emulator.
 add_library(ws_emu STATIC emu/emu.c emu/emu_flash.c)
 target_include_directories(ws_emu PUBLIC emu)
 target_link_libraries(ws_emu PUBLIC ws_core m)
 
-add_executable(ws-emulator emu/main.c)
-target_link_libraries(ws-emulator PRIVATE ws_emu)
+# PC network transport for coreMQTT: TCP + TLS via OpenSSL.
+find_package(OpenSSL REQUIRED)
+add_library(ws_emu_net STATIC emu/emu_net.c)
+target_include_directories(ws_emu_net PUBLIC emu)
+target_link_libraries(ws_emu_net PUBLIC coremqtt OpenSSL::SSL)
+
+add_executable(ws-emulator emu/main.c emu/online.c)
+target_link_libraries(ws-emulator PRIVATE ws_emu ws_mqtt ws_emu_net)
 
 enable_testing()
 
@@ -59,6 +86,14 @@ add_test(NAME emulator COMMAND test_emulator)
 add_executable(test_store test/test_store.c)
 target_link_libraries(test_store PRIVATE ws_emu)
 add_test(NAME store COMMAND test_store)
+
+add_executable(test_cursor test/test_cursor.c)
+target_link_libraries(test_cursor PRIVATE ws_emu)
+add_test(NAME cursor COMMAND test_cursor)
+
+add_executable(test_uplink test/test_uplink.c)
+target_link_libraries(test_uplink PRIVATE ws_emu)
+add_test(NAME uplink COMMAND test_uplink)
 
 # The Cortex-M3 has no FPU: floating point in firmware code would pull in slow software routines.
 add_test(NAME no_floating_point_in_firmware

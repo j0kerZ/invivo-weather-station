@@ -36,6 +36,9 @@ void emu_world_at(uint32_t ts, double *temp_c, double *rh_pct);
  */
 bool emu_run(ws_station_t *st, uint32_t start, uint32_t duration_s);
 
+/* One station tick at emulated time t. */
+void emu_step(ws_station_t *st, uint32_t t);
+
 /* ---- Emulated SPI NOR flash (emu_flash.c) ---- */
 
 void emu_flash_init(uint32_t sector_count); /* blank: every byte 0xFF */

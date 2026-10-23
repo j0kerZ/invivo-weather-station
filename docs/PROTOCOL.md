@@ -137,8 +137,9 @@ On-board SPI NOR flash is used as a circular log of 4096-byte sectors (the NOR e
 | **1-minute aggregate (this design)** | **525,600** | **10.5 MB** | **16 MB NOR** |
 | 10-minute aggregate | 52,560 | 1.05 MB | Still exceeds Cortex-M3 internal flash (≤ 1 MB, shared with firmware) |
 
-A 16 MB part has 4096 sectors. Keeping one sector free for erase-before-write leaves
-4095 × 204 = 835,380 records: 365 days of aggregates plus room for about 850 events per day.
+A 16 MB part has 4096 sectors. The last 2 hold the upload cursor (§7). Of the remaining 4094,
+one is always kept erased ahead, leaving 4093 × 204 = 834,972 records: 365 days of aggregates
+plus room for about 840 events per day. An emulated year uses 2591 sectors.
 
 **Write order and crash safety.** NOR flash erases a whole sector to `0xFF`, and programming can
 only clear bits. Every step below leaves flash in a state the boot scan understands:
@@ -169,14 +170,26 @@ flash, because a year of useful data does not fit in Cortex-M3 internal flash (t
 - **Identity:** the IoT policy allows a device to publish only to
   `invivo-ws/${iot:Connection.Thing.ThingName}/telemetry`. The IoT rule takes `stationId` from the
   topic, never from the payload.
+- **MQTT 5, QoS 1, clean session.** MQTT 5 PUBACKs carry a reason code: below `0x80` is success
+  (`0x10` "no matching subscribers" included); `0x87` means not authorized. With MQTT 3.1.1 a refused
+  publish would only show up as a dropped connection.
 - **Delivery:** QoS 1 is at-least-once. The cloud must treat a repeated `(stationId, seq)` as a
   duplicate, not a new reading.
+- **Flash is the retransmission buffer.** The MQTT client keeps no copies of sent frames. After
+  any reconnect the device resends, from flash, everything after the upload cursor.
+- **Upload cursor:** the highest sequence number up to which every record has a PUBACK, kept in two
+  dedicated flash sectors. It survives reboots, so a station that loses power while offline still
+  uploads its backlog. Packet IDs restart with each connection, so PUBACKs are only matched against
+  publishes from the current connection.
+- **Live first, then backlog:** new records are published as soon as they are stored; the backlog
+  follows in frames of up to 50 records with `BACKFILL` set, at most 16 frames in flight.
 - **PUBACK means IoT Core accepted the message, not that it was stored.** The device keeps every
   record in flash for 365 days regardless, so the cloud can request a resend of a sequence range
   after detecting a gap (future work: command topic `invivo-ws/{stationId}/cmd`).
-- **Offline recovery:** the device remembers the last sequence number acknowledged by IoT Core.
-  After reconnecting it publishes new records live first, then sends the backlog in frames of up to
-  200 records with `BACKFILL` set.
+- **Latency, measured** (emulator on a PC to `eu-north-1`): PUBACK round trip median 28 ms, worst
+  32 ms; TLS + MQTT connect about 200 ms. Disabling Nagle's algorithm (`TCP_NODELAY`) cut the live
+  round trip from 95 ms: TCP was holding the 30-byte frames back. A cellular link adds its own
+  latency; LTE-M is typically tens to hundreds of ms.
 
 ## 8. Sequence numbers
 
