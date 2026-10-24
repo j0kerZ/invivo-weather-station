@@ -124,7 +124,7 @@ describe('handler: writing to DynamoDB', () => {
 
   it('writes a 200-record frame in 8 batches of at most 25', async () => {
     const db = new FakeDb();
-    await makeHandler(db, 'Readings', noSleep)(eventFor(vectorHex('max_records')));
+    await makeHandler(db, 'Readings', { sleep: noSleep })(eventFor(vectorHex('max_records')));
     expect(db.batches.map((b) => b.length)).toEqual([25, 25, 25, 25, 25, 25, 25, 25]);
     expect(new Set(db.batches.flat().map((i) => i.sk)).size).toBe(200);
   });
@@ -132,14 +132,25 @@ describe('handler: writing to DynamoDB', () => {
   it('retries the items DynamoDB did not take', async () => {
     const db = new FakeDb();
     db.unprocessed = [3, 1];
-    await makeHandler(db, 'Readings', noSleep)(eventFor(vectorHex('backfill_high_seq')));
+    await makeHandler(db, 'Readings', { sleep: noSleep })(eventFor(vectorHex('backfill_high_seq')));
     expect(db.batches.map((b) => b.length)).toEqual([3, 3, 1]);
+  });
+
+  it('waits a random time, at most 100, 200 and 400 ms, before each retry', async () => {
+    const waits: number[] = [];
+    const sleep = async (ms: number) => { waits.push(ms); };
+    for (const random of [() => 0.999999, () => 0.5, () => 0]) {
+      const db = new FakeDb();
+      db.unprocessed = [1, 1, 1];
+      await makeHandler(db, 'Readings', { sleep, random })(eventFor(vectorHex('example_live')));
+    }
+    expect(waits.map(Math.round)).toEqual([100, 200, 400, 50, 100, 200, 0, 0, 0]);
   });
 
   it('fails after 4 attempts, so Lambda retries and then uses the failure queue', async () => {
     const db = new FakeDb();
     db.unprocessed = [1, 1, 1, 1];
-    await expect(makeHandler(db, 'Readings', noSleep)(eventFor(vectorHex('example_live')))).rejects.toThrow(
+    await expect(makeHandler(db, 'Readings', { sleep: noSleep })(eventFor(vectorHex('example_live')))).rejects.toThrow(
       '1 items not written after 4 attempts',
     );
     expect(db.batches).toHaveLength(4);
@@ -147,7 +158,7 @@ describe('handler: writing to DynamoDB', () => {
 
   it('fails on a malformed frame without touching the table, and logs the reason', async () => {
     const db = new FakeDb();
-    await expect(makeHandler(db, 'Readings', noSleep)(eventFor(vectorHex('bad_record_crc')))).rejects.toBeInstanceOf(
+    await expect(makeHandler(db, 'Readings', { sleep: noSleep })(eventFor(vectorHex('bad_record_crc')))).rejects.toBeInstanceOf(
       FrameRejected,
     );
     expect(db.batches).toHaveLength(0);
