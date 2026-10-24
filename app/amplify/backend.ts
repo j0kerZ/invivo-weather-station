@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineBackend } from '@aws-amplify/backend';
+import { createIngestion } from './ingest/stack';
 import { createStationIdentities, TOPIC_PREFIX } from './iot/resource';
 
 const backend = defineBackend({});
@@ -10,11 +11,14 @@ const csrDir = fileURLToPath(new URL('../../certs', import.meta.url));
 const iotStack = backend.createStack('StationIdentity');
 const stations = createStationIdentities(iotStack, csrDir);
 
+const { table } = createIngestion(backend.createStack('Ingestion'));
+
 backend.addOutput({
   custom: {
     iot: {
       topicPrefix: TOPIC_PREFIX,
       stations,
     },
+    readingsTable: table.tableName,
   },
 });
