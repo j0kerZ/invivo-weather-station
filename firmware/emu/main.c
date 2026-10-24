@@ -53,26 +53,39 @@ static void on_record(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SI
     ws_frame_t decoded;
     ws_record_t r;
 
-    /* Store first, then publish: nothing is published that a power cut could lose. */
-    if (ws_store_append(run->store, seq, record) != WS_STORE_OK) {
-        run->store_errors++;
-        if (emu_flash_is_dead()) {
-            return; /* the station has lost power: nothing is published */
+    if (ws_record_decode(record, &r) != WS_OK) {
+        run->bad_frames++;
+        return;
+    }
+    bool event = (r.flags & WS_FLAG_EVENT) != 0;
+
+    if (event) {
+        /* A change is a live alert: published if connected, never stored. */
+        if (run->uplink != NULL) {
+            ws_uplink_change(run->uplink, record);
+        }
+    } else {
+        /* A minute summary is stored first, then published: nothing is published that a power
+         * cut could lose. */
+        if (ws_store_append(run->store, seq, record) != WS_STORE_OK) {
+            run->store_errors++;
+            if (emu_flash_is_dead()) {
+                return; /* the station has lost power: nothing is published */
+            }
+        }
+        if (run->uplink != NULL) {
+            ws_uplink_record_stored(run->uplink, seq, record); /* published now if connected */
         }
     }
-    if (run->uplink != NULL) {
-        ws_uplink_record_stored(run->uplink, seq, record); /* published now if connected */
-    }
 
-    /* Exactly what the device would publish live: a one-record frame. Decode it as a self-check. */
-    if (ws_frame_encode(0, seq, record, 1, frame, sizeof frame, &len) != WS_OK ||
-        ws_frame_decode(frame, len, &decoded, NULL) != WS_OK ||
-        ws_record_decode(decoded.records, &r) != WS_OK) {
+    /* The one-record frame the station publishes. Decode it as a self-check. */
+    if (ws_frame_encode(event ? WS_FRAME_FLAG_LIVE_ONLY : 0, seq, record, 1, frame, sizeof frame,
+                        &len) != WS_OK ||
+        ws_frame_decode(frame, len, &decoded, NULL) != WS_OK) {
         run->bad_frames++;
         return;
     }
     run->bytes += len;
-    bool event = (r.flags & WS_FLAG_EVENT) != 0;
     if (event) {
         run->events++;
     } else {
@@ -90,8 +103,11 @@ static void on_record(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SI
     struct tm tm;
     strftime(when, sizeof when, "%Y-%m-%dT%H:%M:%S", gmtime_r(&t, &tm));
 
-    printf("%s.%uZ  #%-5lu %-6s", when, r.tenths, (unsigned long)seq,
-           event ? "CHANGE" : "MINUTE");
+    if (event) {
+        printf("%s.%uZ  %-6s %-6s", when, r.tenths, "-", "CHANGE");
+    } else {
+        printf("%s.%uZ  #%-5lu %-6s", when, r.tenths, (unsigned long)seq, "MINUTE");
+    }
     if (event) {
         print_pair("  T", r.t_mean, r.temp_valid_pct > 0, " °C");
         print_pair("   RH", r.rh_mean, r.rh_valid_pct > 0, " %");

@@ -3,7 +3,7 @@
 #include "check.h"
 #include "test_util.h"
 
-/* docs/PROTOCOL.md §11 */
+/* docs/PROTOCOL.md §10 */
 static const ws_record_t EXAMPLE_RECORD = {
     .ts = 1792742400u, /* 2026-10-23 08:00:00 UTC */
     .t_mean = 1234, .t_min = 1210, .t_max = 1261,

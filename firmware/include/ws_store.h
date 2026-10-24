@@ -2,7 +2,7 @@
 #define WS_STORE_H
 
 /*
- * Circular record log on SPI NOR flash (docs/PROTOCOL.md §6): 365 days of history that survives
+ * Circular record log on SPI NOR flash (docs/PROTOCOL.md §5): 365 days of history that survives
  * power cuts. A record's position in flash implies its sequence number, so sequence numbers
  * survive reboots without a separate counter.
  */

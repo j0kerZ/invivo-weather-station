@@ -36,6 +36,8 @@ void ws_station_tick(ws_station_t *st, uint32_t now, uint8_t tenths, bool time_s
             st->encode_errors++;
             continue;
         }
-        st->sink(st->sink_ctx, st->next_seq++, encoded);
+        /* Only minute summaries are stored and numbered; a change is a live-only alert. */
+        bool is_change = (records[i].flags & WS_FLAG_EVENT) != 0;
+        st->sink(st->sink_ctx, is_change ? 0 : st->next_seq++, encoded);
     }
 }

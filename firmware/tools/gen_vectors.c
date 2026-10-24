@@ -133,8 +133,8 @@ int main(void)
     rec = (ws_record_t){.ts = BASE.ts + 17, .tenths = 3, .t_mean = 95, .t_min = 95,
                         .t_max = 95, .rh_mean = 9310, .rh_min = 9310, .rh_max = 9310,
                         .temp_valid_pct = 100, .rh_valid_pct = 100, .flags = WS_FLAG_EVENT};
-    len = build(buf, 0, 3, &rec, 1);
-    emit("change_event", "Change event at 0.3 s past the second: one sample, 100% valid", buf,
+    len = build(buf, WS_FRAME_FLAG_LIVE_ONLY, 0, &rec, 1);
+    emit("change_live_only", "Change at 0.3 s past the second: live-only frame, sequence 0", buf,
          len, WS_OK);
 
     for (size_t i = 0; i < 3; i++) {

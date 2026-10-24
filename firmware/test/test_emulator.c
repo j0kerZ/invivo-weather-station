@@ -59,13 +59,14 @@ static void test_rain_shower(void)
 
     for (uint32_t i = 0; i < c.count; i++) {
         const ws_record_t *r = &c.rec[i];
-        CHECK(c.seq[i] == i + 1); /* contiguous sequence numbers from 1 */
         if (is_change(r)) {
+            CHECK(c.seq[i] == 0); /* changes are live-only: not stored, not numbered */
             changes++;
             /* Only the shower changes fast enough to leave the 0.5 °C / 0.4 %RH band */
             CHECK(r->ts >= DAY_START + 13 * HOUR && r->ts < DAY_START + 14 * HOUR);
             CHECK(r->temp_valid_pct == 100 && r->rh_valid_pct == 100);
         } else {
+            CHECK(c.seq[i] == minutes + 1);       /* summaries: contiguous from 1 */
             CHECK(r->ts == start + 60 * minutes); /* one per minute, aligned */
             minutes++;
             CHECK(r->temp_valid_pct == 100 && r->rh_valid_pct == 100); /* 600 of 600 */

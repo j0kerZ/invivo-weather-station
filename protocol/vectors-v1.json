@@ -31,13 +31,13 @@
       "hex": "01000100020000000014db6a00008000800080d61f9a1f1c200064041b2bb9"
     },
     {
-      "name": "change_event",
-      "description": "Change event at 0.3 s past the second: one sample, 100% valid",
+      "name": "change_live_only",
+      "description": "Change at 0.3 s past the second: live-only frame, sequence 0",
       "expect": "OK",
-      "frame": {"version": 1, "frameFlags": 0, "seqFirst": 3, "records": [
+      "frame": {"version": 1, "frameFlags": 2, "seqFirst": 0, "records": [
         {"ts": 1792742417, "tenths": 3, "tMean": 95, "tMin": 95, "tMax": 95, "rhMean": 9310, "rhMin": 9310, "rhMax": 9310, "tempValidPct": 100, "rhValidPct": 100, "flags": 1}
       ]},
-      "hex": "01000100030000001114db6a035f005f005f005e245e245e2464640155a642"
+      "hex": "01020100000000001114db6a035f005f005f005e245e245e246464015552c5"
     },
     {
       "name": "backfill_high_seq",

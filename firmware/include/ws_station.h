@@ -15,7 +15,8 @@
 #define WS_SAMPLE_PERIOD_MS (1000u / WS_SAMPLE_HZ) /* 100 ms */
 
 /*
- * Receives every encoded record with its sequence number: where it is stored and published.
+ * Receives every encoded record: where it is stored and published. A minute summary comes with its
+ * sequence number; a change record comes with 0, because changes are not stored.
  */
 typedef void (*ws_record_sink_t)(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SIZE]);
 

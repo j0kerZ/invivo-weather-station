@@ -15,7 +15,7 @@
 
 #define WS_PROTOCOL_VERSION 1u
 
-/* §4 Record */
+/* §3 Record */
 #define WS_RECORD_SIZE 21u
 #define WS_RECORD_CRC_OFFSET 20u
 #define WS_VALID_PCT_MAX 100u /* "% of samples valid": whole percent, rounded down */
@@ -32,7 +32,7 @@
 #define WS_FLAG_RH_ERROR (1u << 3)
 #define WS_FLAG_HEATER_ON (1u << 4)
 
-/* §5 Frame */
+/* §4 Frame */
 #define WS_FRAME_HEADER_SIZE 8u
 #define WS_FRAME_CRC_SIZE 2u
 #define WS_FRAME_MAX_RECORDS 200u
@@ -40,6 +40,7 @@
 #define WS_FRAME_MAX_SIZE WS_FRAME_SIZE(WS_FRAME_MAX_RECORDS)
 
 #define WS_FRAME_FLAG_BACKFILL (1u << 0)
+#define WS_FRAME_FLAG_LIVE_ONLY (1u << 1) /* change records: not stored on the device, seq_first 0 */
 
 typedef enum {
     WS_OK = 0,
@@ -80,7 +81,7 @@ typedef struct {
 /* Stable reason-code name, e.g. "RECORD_CRC". Used in logs and in the shared test vectors. */
 const char *ws_status_name(ws_status_t status);
 
-/* Checks the §4 rules: sentinels, ranges, min <= mean <= max, event shape. */
+/* Checks the §3 rules: sentinels, ranges, min <= mean <= max, event shape. */
 bool ws_record_is_valid(const ws_record_t *rec);
 
 /* Refuses to encode a record that a decoder would reject. */
@@ -96,7 +97,7 @@ ws_status_t ws_frame_encode(uint8_t frame_flags, uint32_t seq_first, const uint8
                             size_t count, uint8_t *out, size_t out_cap, size_t *out_len);
 
 /*
- * Validates a whole frame in the §9 order. On WS_ERR_RECORD_CRC or WS_ERR_RECORD_INVALID,
+ * Validates a whole frame in the §8 order. On WS_ERR_RECORD_CRC or WS_ERR_RECORD_INVALID,
  * *bad_record (if not NULL) is the index of the first failing record.
  */
 ws_status_t ws_frame_decode(const uint8_t *buf, size_t len, ws_frame_t *frame,

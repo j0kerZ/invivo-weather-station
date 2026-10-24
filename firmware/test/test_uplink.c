@@ -183,6 +183,36 @@ static void test_packet_ids_reused_after_reconnect(void)
     CHECK(s.up.acked_through == 3);
 }
 
+/* A change is a live-only alert: one frame, never stored, never resent, never moves the cursor. */
+static void test_changes_are_live_only(void)
+{
+    station_t s;
+    uint8_t rec[WS_RECORD_SIZE];
+    ws_record_t change = {.ts = T0, .tenths = 3, .t_mean = 150, .t_min = 150, .t_max = 150,
+                          .rh_mean = 9000, .rh_min = 9000, .rh_max = 9000,
+                          .temp_valid_pct = 100, .rh_valid_pct = 100, .flags = WS_FLAG_EVENT};
+    ws_record_encode(&change, rec);
+    fresh(&s);
+
+    ws_uplink_change(&s.up, rec); /* offline: dropped, nothing queued */
+    CHECK(pub.n_sent == 0 && s.up.changes_dropped == 1);
+
+    ws_uplink_connected(&s.up);
+    ws_uplink_change(&s.up, rec);
+    CHECK(pub.n_sent == 1);
+    CHECK(pub.sent[0].flags == WS_FRAME_FLAG_LIVE_ONLY && pub.sent[0].first == 0);
+    CHECK(s.up.change_frames == 1 && s.up.n_inflight == 0);
+    CHECK(ws_store_next_seq(&s.store) == 1); /* nothing stored */
+
+    ws_uplink_ack(&s.up, pub.sent[0].packet_id, true);
+    CHECK(s.up.acked_through == 0); /* its PUBACK does not move the cursor */
+
+    ws_uplink_disconnected(&s.up);
+    ws_uplink_connected(&s.up);
+    ws_uplink_poll(&s.up);
+    CHECK(pub.n_sent == 1); /* and it is never resent */
+}
+
 static void test_publish_failure_falls_back_to_flash(void)
 {
     station_t s;
@@ -330,6 +360,7 @@ int main(void)
     test_backlog_after_outage();
     test_lost_connection_resends_from_cursor();
     test_packet_ids_reused_after_reconnect();
+    test_changes_are_live_only();
     test_publish_failure_falls_back_to_flash();
     test_inflight_limit();
     test_rejected_publish();

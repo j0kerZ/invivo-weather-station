@@ -2,7 +2,7 @@
 #define WS_AGGREGATOR_H
 
 /*
- * Turns individual samples into protocol records (docs/PROTOCOL.md §4):
+ * Turns individual samples into protocol records (docs/PROTOCOL.md §2, §3):
  *   - one summary per wall-clock minute (min/mean/max of the valid samples), and
  *   - a change event as soon as a value leaves the band around the last published value
  *     (report by exception).

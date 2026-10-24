@@ -93,7 +93,9 @@ static void on_ack(void *ctx, uint16_t packet_id, uint8_t reason)
         if (n_rtt < MAX_RTT) {
             rtt[n_rtt++] = ms;
         }
-        if (count > 1) {
+        if (first == 0) {
+            printf("    PUBACK change (live only) %4lu ms", (unsigned long)ms);
+        } else if (count > 1) {
             printf("    PUBACK #%lu-#%lu (backfill, %u records) %4lu ms", (unsigned long)first,
                    (unsigned long)(first + count - 1), count, (unsigned long)ms);
         } else {
@@ -241,11 +243,13 @@ int online_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
     fprintf(stderr,
             "\nuplink: %lu connections, %lu link losses; %lu live frames, %lu backfill frames "
             "(%lu records); %lu rejected, %lu unreadable\n"
+            "uplink: %lu change frames sent live, %lu dropped while offline\n"
             "uplink: delivered through #%lu of #%lu%s\n",
             (unsigned long)connections, (unsigned long)link_losses,
             (unsigned long)uplink.live_frames, (unsigned long)uplink.backfill_frames,
             (unsigned long)uplink.backfill_records, (unsigned long)uplink.rejected,
-            (unsigned long)uplink.missing, (unsigned long)uplink.acked_through,
+            (unsigned long)uplink.missing, (unsigned long)uplink.change_frames,
+            (unsigned long)uplink.changes_dropped, (unsigned long)uplink.acked_through,
             (unsigned long)last, uplink.acked_through == last ? " (all)" : "");
     if (n_rtt > 0) {
         qsort(rtt, n_rtt, sizeof rtt[0], compare_u32);

@@ -38,7 +38,7 @@ bool ws_mqtt_init(ws_mqtt_t *m, const TransportInterface_t *transport,
         return false;
     }
     /* QoS 1 bookkeeping only. No retransmit store: flash is the retransmit buffer. */
-    m->last_status = MQTT_InitStatefulQoS(&m->mqtt, m->outgoing, WS_UPLINK_MAX_INFLIGHT, NULL, 0,
+    m->last_status = MQTT_InitStatefulQoS(&m->mqtt, m->outgoing, WS_MQTT_OUTGOING, NULL, 0,
                                           m->ack_props, sizeof m->ack_props);
     return m->last_status == MQTTSuccess;
 }

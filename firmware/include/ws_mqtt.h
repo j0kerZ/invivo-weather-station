@@ -18,6 +18,7 @@
 #include "ws_uplink.h"
 
 #define WS_MQTT_TOPIC_MAX 96u
+#define WS_MQTT_OUTGOING (2u * WS_UPLINK_MAX_INFLIGHT) /* tracked records + live changes */
 
 /* `reason` is the MQTT 5 reason code: below 0x80 is success (0x10 = no subscribers yet). */
 typedef void (*ws_mqtt_ack_fn)(void *ctx, uint16_t packet_id, uint8_t reason);
@@ -25,7 +26,7 @@ typedef void (*ws_mqtt_ack_fn)(void *ctx, uint16_t packet_id, uint8_t reason);
 typedef struct {
     MQTTContext_t mqtt; /* first member: the coreMQTT callback finds the adapter from it */
     uint8_t buffer[WS_FRAME_MAX_SIZE + 256];
-    MQTTPubAckInfo_t outgoing[WS_UPLINK_MAX_INFLIGHT];
+    MQTTPubAckInfo_t outgoing[WS_MQTT_OUTGOING];
     uint8_t ack_props[64];
     char topic[WS_MQTT_TOPIC_MAX];
     bool connected;

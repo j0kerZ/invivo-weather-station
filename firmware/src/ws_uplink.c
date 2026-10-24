@@ -94,6 +94,21 @@ void ws_uplink_record_stored(ws_uplink_t *u, uint32_t seq, const uint8_t record[
     }
 }
 
+void ws_uplink_change(ws_uplink_t *u, const uint8_t record[])
+{
+    uint8_t frame[WS_FRAME_SIZE(1)];
+    size_t len;
+    uint16_t packet_id; /* its PUBACK matches nothing in flight and is ignored */
+
+    if (!u->connected ||
+        ws_frame_encode(WS_FRAME_FLAG_LIVE_ONLY, 0, record, 1, frame, sizeof frame, &len) != WS_OK ||
+        !u->publish(u->publish_ctx, frame, len, &packet_id)) {
+        u->changes_dropped++;
+        return;
+    }
+    u->change_frames++;
+}
+
 void ws_uplink_poll(ws_uplink_t *u)
 {
     static uint8_t records[WS_UPLINK_BACKFILL_RECORDS * WS_RECORD_SIZE]; /* 1 KB: not on the stack */

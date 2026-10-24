@@ -49,6 +49,7 @@ typedef struct {
 
     /* Statistics */
     uint32_t live_frames, backfill_frames, backfill_records, rejected, missing, cursor_errors;
+    uint32_t change_frames, changes_dropped;
 } ws_uplink_t;
 
 /* Starts from the persisted cursor; without one, from the oldest record in flash. */
@@ -60,6 +61,12 @@ void ws_uplink_disconnected(ws_uplink_t *u);
 
 /* Call after each record is stored in flash. Publishes it at once if connected. */
 void ws_uplink_record_stored(ws_uplink_t *u, uint32_t seq, const uint8_t record[]);
+
+/*
+ * Publishes a change record live, if connected. Not stored, not numbered and not resent: a late
+ * alert has lost its purpose, and the minute summary carries its values.
+ */
+void ws_uplink_change(ws_uplink_t *u, const uint8_t record[]);
 
 /* Call regularly while connected: sends backlog frames while there is room in flight. */
 void ws_uplink_poll(ws_uplink_t *u);
