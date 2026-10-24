@@ -18,26 +18,32 @@ this document disagree, that is a bug.
 
 ## 2. Sampling decision
 
-The interviewers clarified that the sensors "respond within a few milliseconds" and that the
-sampling rate (up to ~100 Hz) is our choice. We choose **one sample every 2 s, aggregated to one
-record per minute, plus immediate event records**:
+**Assumption (given by the interviewers):** the sensors respond to changes within a few
+milliseconds, and the sampling rate, up to about 100 Hz or much less, is ours to choose from the
+requirements.
 
-- **The sensors do not produce new information at 100 Hz.** The LM92 datasheet gives a temperature
-  conversion time of 500 ms typical and 1000 ms maximum, and states that reading faster than the
-  conversion time prevents the data from being updated. Polling at 1 Hz would sit exactly on that
-  limit, so we poll every 2 s. TI lists the HDC3020 humidity response time as about 4 s.
-  The I²C read takes milliseconds, but the measurement itself does not.
-- The protocol allows up to 60 samples per window (1 Hz), so a faster sensor can be used later
-  without a protocol change.
-- **Air temperature and humidity inside a radiation shield change over seconds to minutes.**
-  Irrigation decisions are made on minutes-to-hours data.
-- **Cost scales with message rate.** One message per second is 60× the IoT messages, Lambda
-  invocations and DynamoDB writes of one per minute; 100 Hz is 6000×.
-- **Storage:** raw 1 Hz data for a year is about 315 MB per station; 1-minute aggregates are about
-  10.5 MB (§6).
+We choose **one sample every 2 s, aggregated to one record per minute, plus immediate event
+records**, because the requirement is irrigation, not fast signals:
+
+- **Weather changes over minutes, even if the sensors are instant.** Irrigation decisions use
+  hourly or daily data (for example reference evapotranspiration).
+- **Real stations do the same.** The WMO standard reports air temperature as 1-minute averages.
+  Common farm stations such as the Davis Vantage Pro2 update every ~2.5 s; research and farm
+  networks sample every 5–15 s and keep 15-minute averages; commercial farm stations upload hourly.
+  2 s sampling with 1-minute records sits at the frequent end of real practice.
+- **100 Hz would cost 200× more** sensor reads, processing and power than 2 s, for no information
+  that matters to irrigation. Storage: 100 Hz raw data for a year would be about 31.5 GB per
+  station; 1-minute records are about 10.5 MB (§6).
+- **The 1 s delivery requirement is met by sending, not by sampling faster:** each record is
+  published as soon as it is produced, and events (such as frost) are published immediately.
+- The protocol allows up to 60 samples per window (1 Hz), so the rate can be raised later without a
+  protocol change.
 
 The individual samples are not discarded silently: each minute keeps **min, mean and max** for both
 quantities, so short extremes (for example a frost dip) survive aggregation.
+
+(For the real parts, 2 s is also comfortable: the LM92 datasheet gives a conversion time of up to
+1000 ms, and TI lists the HDC3020 humidity response as about 4 s.)
 
 ## 3. Conventions
 

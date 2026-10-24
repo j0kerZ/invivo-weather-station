@@ -12,7 +12,7 @@
 #include "ws_aggregator.h"
 #include "ws_protocol.h"
 
-#define WS_SAMPLE_PERIOD_S 2u /* LM92 conversion takes up to 1000 ms; see PROTOCOL.md §2 */
+#define WS_SAMPLE_PERIOD_S 2u /* see PROTOCOL.md §2 */
 
 /*
  * Receives every encoded record with its sequence number. This is where the record is written to

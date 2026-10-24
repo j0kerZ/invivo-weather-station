@@ -6,7 +6,7 @@
  *   D2..D0   status bits (CRIT, HIGH, LOW): not temperature, masked off
  *
  * The LM92 converts continuously (500 ms typical, 1000 ms maximum). Reading faster than the
- * conversion time stops the value from updating, which is why the station polls every 2 s.
+ * conversion time stops the value from updating; the station's 2 s polling stays clear of that.
  */
 
 #include "ws_hal.h"
