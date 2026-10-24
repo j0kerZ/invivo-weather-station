@@ -20,6 +20,7 @@ typedef struct {
     double speed;           /* emulated seconds per real second */
     double outage_at_min;   /* emulated minute the link drops; negative for none */
     double outage_min;      /* how long it stays down */
+    bool no_topic_alias;    /* send the full topic with every message */
     bool verbose;
 } online_config_t;
 

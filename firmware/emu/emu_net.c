@@ -130,10 +130,21 @@ int32_t emu_net_recv(NetworkContext_t *n, void *buf, size_t len)
     return result(n, SSL_read(n->ssl, buf, chunk));
 }
 
+static uint64_t bytes_sent;
+
 int32_t emu_net_send(NetworkContext_t *n, const void *buf, size_t len)
 {
     int chunk = len > INT32_MAX ? INT32_MAX : (int)len;
-    return result(n, SSL_write(n->ssl, buf, chunk));
+    int32_t sent = result(n, SSL_write(n->ssl, buf, chunk));
+    if (sent > 0) {
+        bytes_sent += (uint64_t)sent;
+    }
+    return sent;
+}
+
+uint64_t emu_net_bytes_sent(void)
+{
+    return bytes_sent;
 }
 
 uint32_t emu_now_ms(void)

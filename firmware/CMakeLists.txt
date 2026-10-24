@@ -95,6 +95,10 @@ add_executable(test_uplink test/test_uplink.c)
 target_link_libraries(test_uplink PRIVATE ws_emu)
 add_test(NAME uplink COMMAND test_uplink)
 
+add_executable(test_mqtt test/test_mqtt.c)
+target_link_libraries(test_mqtt PRIVATE ws_mqtt)
+add_test(NAME mqtt COMMAND test_mqtt)
+
 # The Cortex-M3 has no FPU: floating point in firmware code would pull in slow software routines.
 add_test(NAME no_floating_point_in_firmware
          COMMAND sh -c "! grep -nwE 'float|double' ${CMAKE_SOURCE_DIR}/src/*.c ${CMAKE_SOURCE_DIR}/include/*.h")

@@ -29,6 +29,7 @@ bool ws_mqtt_init(ws_mqtt_t *m, const TransportInterface_t *transport,
                   MQTTGetCurrentTimeFunc_t now_ms, ws_mqtt_ack_fn on_ack, void *ack_ctx)
 {
     memset(m, 0, sizeof *m);
+    m->use_topic_alias = true;
     m->on_ack = on_ack;
     m->ack_ctx = ack_ctx;
 
@@ -63,6 +64,8 @@ bool ws_mqtt_connect(ws_mqtt_t *m, const char *thing_name, const char *topic)
     m->last_status =
         MQTT_Connect(&m->mqtt, &info, NULL, CONNACK_TIMEOUT_MS, &session_present, NULL, NULL);
     m->connected = m->last_status == MQTTSuccess;
+    m->topic_alias_max = m->mqtt.connectionProperties.serverTopicAliasMax;
+    m->alias_mapped = false; /* aliases last for one connection only */
     return m->connected;
 }
 
@@ -78,9 +81,27 @@ bool ws_mqtt_publish_to(ws_mqtt_t *m, const char *topic, const uint8_t *frame, s
     };
     uint16_t id = MQTT_GetPacketId(&m->mqtt);
 
-    m->last_status = MQTT_Publish(&m->mqtt, &info, id, NULL);
+    MQTTPropBuilder_t props;
+    uint8_t props_buf[8];
+    bool aliased = m->use_topic_alias && m->topic_alias_max >= WS_MQTT_TOPIC_ALIAS &&
+                   strcmp(topic, m->topic) == 0;
+    if (aliased) {
+        if (MQTTPropertyBuilder_Init(&props, props_buf, sizeof props_buf) != MQTTSuccess ||
+            MQTTPropAdd_TopicAlias(&props, WS_MQTT_TOPIC_ALIAS, NULL) != MQTTSuccess) {
+            return false;
+        }
+        if (m->alias_mapped) {
+            info.pTopicName = NULL; /* the alias alone names the topic */
+            info.topicNameLength = 0;
+        }
+    }
+
+    m->last_status = MQTT_Publish(&m->mqtt, &info, id, aliased ? &props : NULL);
     if (m->last_status != MQTTSuccess) {
         return false;
+    }
+    if (aliased) {
+        m->alias_mapped = true; /* only once the full topic has actually been sent */
     }
     *packet_id = id;
     return true;

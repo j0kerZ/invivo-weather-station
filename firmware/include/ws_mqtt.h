@@ -19,6 +19,7 @@
 
 #define WS_MQTT_TOPIC_MAX 96u
 #define WS_MQTT_OUTGOING (2u * WS_UPLINK_MAX_INFLIGHT) /* tracked records + live changes */
+#define WS_MQTT_TOPIC_ALIAS 1u /* MQTT 5 alias for the telemetry topic */
 
 /* `reason` is the MQTT 5 reason code: below 0x80 is success (0x10 = no subscribers yet). */
 typedef void (*ws_mqtt_ack_fn)(void *ctx, uint16_t packet_id, uint8_t reason);
@@ -30,6 +31,12 @@ typedef struct {
     uint8_t ack_props[64];
     char topic[WS_MQTT_TOPIC_MAX];
     bool connected;
+
+    /* MQTT 5 topic alias: the telemetry topic is sent in full once per connection, then only as
+     * a 2-byte alias. Used only if the broker allows at least one alias. */
+    bool use_topic_alias;    /* set false to send the full topic every time */
+    uint16_t topic_alias_max; /* from the broker's CONNACK */
+    bool alias_mapped;       /* the broker has seen the full topic with the alias */
     ws_mqtt_ack_fn on_ack;
     void *ack_ctx;
     MQTTStatus_t last_status;

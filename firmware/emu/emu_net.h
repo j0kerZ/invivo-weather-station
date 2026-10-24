@@ -23,6 +23,9 @@ void emu_net_close(NetworkContext_t *n);
 int32_t emu_net_recv(NetworkContext_t *n, void *buf, size_t len);
 int32_t emu_net_send(NetworkContext_t *n, const void *buf, size_t len);
 
+/* MQTT bytes handed to TLS since start (before TLS framing). */
+uint64_t emu_net_bytes_sent(void);
+
 /* Monotonic milliseconds, for coreMQTT timeouts and keep-alive. */
 uint32_t emu_now_ms(void);
 

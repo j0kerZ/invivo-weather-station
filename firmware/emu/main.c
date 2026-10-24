@@ -165,7 +165,7 @@ static int usage(void)
                     "                   [--flash FILE] [--sectors N] [--power-cut-after MINUTES]\n"
                     "                   [--mqtt STATION_ID [--certs DIR] [--speed X] "
                     "[--outage AT_MIN:FOR_MIN]\n"
-                    "                    [--authz-check OTHER_STATION_ID]]\n");
+                    "                    [--topic-alias on|off] [--authz-check OTHER_STATION_ID]]\n");
     return 2;
 }
 
@@ -227,6 +227,12 @@ int main(int argc, char **argv)
             online.speed = atof(val);
         } else if (strcmp(arg, "--outage") == 0) {
             if (sscanf(val, "%lf:%lf", &online.outage_at_min, &online.outage_min) != 2) {
+                return usage();
+            }
+        } else if (strcmp(arg, "--topic-alias") == 0) {
+            if (strcmp(val, "off") == 0) {
+                online.no_topic_alias = true;
+            } else if (strcmp(val, "on") != 0) {
                 return usage();
             }
         } else if (strcmp(arg, "--authz-check") == 0) {

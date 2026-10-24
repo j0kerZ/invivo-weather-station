@@ -116,14 +116,19 @@ static bool connect_now(void)
     }
     transport = (TransportInterface_t){
         .pNetworkContext = &net, .send = emu_net_send, .recv = emu_net_recv};
-    if (!ws_mqtt_init(&mqtt, &transport, emu_now_ms, on_ack, NULL) ||
-        !ws_mqtt_connect(&mqtt, cfg.station_id, topic)) {
+    if (!ws_mqtt_init(&mqtt, &transport, emu_now_ms, on_ack, NULL)) {
+        emu_net_close(&net);
+        return false;
+    }
+    mqtt.use_topic_alias = !cfg.no_topic_alias;
+    if (!ws_mqtt_connect(&mqtt, cfg.station_id, topic)) {
         fprintf(stderr, "mqtt: connect failed: %s\n", MQTT_Status_strerror(mqtt.last_status));
         emu_net_close(&net);
         return false;
     }
-    printf("--- connected to %s as %s (TLS + MQTT %lu ms) ---\n", endpoint, cfg.station_id,
-           (unsigned long)(emu_now_ms() - t0));
+    printf("--- connected to %s as %s (TLS + MQTT %lu ms; broker allows %u topic aliases%s) ---\n",
+           endpoint, cfg.station_id, (unsigned long)(emu_now_ms() - t0), mqtt.topic_alias_max,
+           mqtt.use_topic_alias ? "" : ", not used");
     return true;
 }
 
@@ -251,6 +256,8 @@ int online_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
             (unsigned long)uplink.missing, (unsigned long)uplink.change_frames,
             (unsigned long)uplink.changes_dropped, (unsigned long)uplink.acked_through,
             (unsigned long)last, uplink.acked_through == last ? " (all)" : "");
+    fprintf(stderr, "network: %llu MQTT bytes sent (before TLS), including the connection\n",
+            (unsigned long long)emu_net_bytes_sent());
     if (n_rtt > 0) {
         qsort(rtt, n_rtt, sizeof rtt[0], compare_u32);
         fprintf(stderr, "PUBACK round trip over %zu publishes: median %lu ms, p95 %lu ms, max %lu ms\n",
