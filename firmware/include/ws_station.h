@@ -3,7 +3,7 @@
 
 /*
  * The station's main loop body. On the MCU, a timer interrupt wakes the CPU every
- * WS_SAMPLE_PERIOD_S seconds and calls ws_station_tick(); in the emulator, a loop does.
+ * WS_SAMPLE_PERIOD_MS and calls ws_station_tick(); in the emulator, a loop does.
  */
 
 #include <stdbool.h>
@@ -12,11 +12,10 @@
 #include "ws_aggregator.h"
 #include "ws_protocol.h"
 
-#define WS_SAMPLE_PERIOD_S 2u /* see PROTOCOL.md §2 */
+#define WS_SAMPLE_PERIOD_MS (1000u / WS_SAMPLE_HZ) /* 100 ms */
 
 /*
- * Receives every encoded record with its sequence number. This is where the record is written to
- * flash and published (steps 1d and 1e).
+ * Receives every encoded record with its sequence number: where it is stored and published.
  */
 typedef void (*ws_record_sink_t)(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SIZE]);
 
@@ -35,6 +34,7 @@ typedef struct {
 void ws_station_init(ws_station_t *st, uint32_t next_seq, const ws_event_config_t *cfg,
                      ws_record_sink_t sink, void *sink_ctx);
 
-void ws_station_tick(ws_station_t *st, uint32_t now, bool time_synced);
+/* One sample at Unix time `now` + `tenths` tenths of a second. */
+void ws_station_tick(ws_station_t *st, uint32_t now, uint8_t tenths, bool time_synced);
 
 #endif

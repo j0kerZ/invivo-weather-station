@@ -15,7 +15,7 @@ static const ws_record_t BASE = {
     .ts = 1792742400u, /* 2026-10-23 08:00:00 UTC */
     .t_mean = 1234, .t_min = 1210, .t_max = 1261,
     .rh_mean = 8150, .rh_min = 8090, .rh_max = 8220,
-    .n_temp = 60, .n_rh = 60, .flags = 0,
+    .temp_valid_pct = 100, .rh_valid_pct = 100, .flags = 0,
 };
 
 static int mismatches;
@@ -23,11 +23,11 @@ static int emitted;
 
 static void print_record(const ws_record_t *r)
 {
-    printf("{\"ts\": %lu, \"tMean\": %d, \"tMin\": %d, \"tMax\": %d, "
+    printf("{\"ts\": %lu, \"tenths\": %u, \"tMean\": %d, \"tMin\": %d, \"tMax\": %d, "
            "\"rhMean\": %u, \"rhMin\": %u, \"rhMax\": %u, "
-           "\"nTemp\": %u, \"nRh\": %u, \"flags\": %u}",
-           (unsigned long)r->ts, r->t_mean, r->t_min, r->t_max, r->rh_mean, r->rh_min,
-           r->rh_max, r->n_temp, r->n_rh, r->flags);
+           "\"tempValidPct\": %u, \"rhValidPct\": %u, \"flags\": %u}",
+           (unsigned long)r->ts, r->tenths, r->t_mean, r->t_min, r->t_max, r->rh_mean,
+           r->rh_min, r->rh_max, r->temp_valid_pct, r->rh_valid_pct, r->flags);
 }
 
 static void emit(const char *name, const char *description, const uint8_t *buf, size_t len,
@@ -117,24 +117,25 @@ int main(void)
     emit("example_live", "PROTOCOL.md section 11: one live 1-minute aggregate", buf, len, WS_OK);
 
     rec = (ws_record_t){.ts = BASE.ts, .t_mean = 0, .t_min = WS_TEMP_MIN, .t_max = WS_TEMP_MAX,
-                        .rh_mean = 5000, .rh_min = 0, .rh_max = WS_RH_MAX, .n_temp = 60,
-                        .n_rh = 60};
+                        .rh_mean = 5000, .rh_min = 0, .rh_max = WS_RH_MAX,
+                        .temp_valid_pct = 100, .rh_valid_pct = 1};
     len = build(buf, 0, 1, &rec, 1);
     emit("range_limits", "Extremes of both sensor ranges; negative temperature", buf, len, WS_OK);
 
     rec = BASE;
     rec.t_mean = rec.t_min = rec.t_max = WS_TEMP_INVALID;
-    rec.n_temp = 0;
+    rec.temp_valid_pct = 0;
     rec.flags = WS_FLAG_TEMP_ERROR;
     len = build(buf, 0, 2, &rec, 1);
     emit("temp_sensor_failed", "No valid temperature in the window: sentinel values", buf, len,
          WS_OK);
 
-    rec = (ws_record_t){.ts = BASE.ts + 17, .t_mean = 95, .t_min = 95, .t_max = 95,
-                        .rh_mean = 9310, .rh_min = 9310, .rh_max = 9310, .n_temp = 1,
-                        .n_rh = 1, .flags = WS_FLAG_EVENT};
+    rec = (ws_record_t){.ts = BASE.ts + 17, .tenths = 3, .t_mean = 95, .t_min = 95,
+                        .t_max = 95, .rh_mean = 9310, .rh_min = 9310, .rh_max = 9310,
+                        .temp_valid_pct = 100, .rh_valid_pct = 100, .flags = WS_FLAG_EVENT};
     len = build(buf, 0, 3, &rec, 1);
-    emit("frost_event", "Event record: temperature fell to 0.95 degC", buf, len, WS_OK);
+    emit("change_event", "Change event at 0.3 s past the second: one sample, 100% valid", buf,
+         len, WS_OK);
 
     for (size_t i = 0; i < 3; i++) {
         recs[i] = BASE;
@@ -147,7 +148,7 @@ int main(void)
 
     len = build(buf, 0, 4, &BASE, 1);
     buf[1] = 0xFE;
-    buf[WS_FRAME_HEADER_SIZE + 18] = 0xE0;
+    buf[WS_FRAME_HEADER_SIZE + 19] = 0xE0;
     reseal_record(&buf[WS_FRAME_HEADER_SIZE]);
     reseal_frame(buf, len);
     emit("reserved_bits_set", "Reserved flag bits must be ignored, not rejected", buf, len,
@@ -160,7 +161,7 @@ int main(void)
         recs[i].t_max = (int16_t)(BASE.t_max + (int16_t)i);
     }
     len = build(buf, WS_FRAME_FLAG_BACKFILL, 5, recs, WS_FRAME_MAX_RECORDS);
-    emit("max_records", "Largest allowed frame: 200 records, 4010 bytes", buf, len, WS_OK);
+    emit("max_records", "Largest allowed frame: 200 records, 4210 bytes", buf, len, WS_OK);
 
     /* ---- Malformed frames ---- */
 
@@ -216,22 +217,26 @@ int main(void)
     rec = BASE;
     rec.t_mean = rec.t_min = rec.t_max = WS_TEMP_INVALID;
     len = build_invalid(buf, &rec);
-    emit("sentinel_with_samples", "n_temp = 60 but values are the no-data sentinel", buf, len,
+    emit("sentinel_with_samples", "100% valid but values are the no-data sentinel", buf, len,
          WS_ERR_RECORD_INVALID);
 
     rec = BASE;
-    rec.n_rh = 0;
+    rec.rh_valid_pct = 0;
     len = build_invalid(buf, &rec);
-    emit("values_without_samples", "n_rh = 0 but humidity values present", buf, len,
+    emit("values_without_samples", "0% humidity valid but values present", buf, len,
          WS_ERR_RECORD_INVALID);
 
     rec = BASE;
-    rec.n_temp = WS_WINDOW_SAMPLES + 1;
+    rec.temp_valid_pct = WS_VALID_PCT_MAX + 1;
     len = build_invalid(buf, &rec);
-    emit("too_many_samples", "61 samples in a 60 s window", buf, len, WS_ERR_RECORD_INVALID);
+    emit("valid_above_100", "101% of samples valid", buf, len, WS_ERR_RECORD_INVALID);
 
     rec = BASE;
-    rec.n_temp = rec.n_rh = 1;
+    rec.tenths = 10;
+    len = build_invalid(buf, &rec);
+    emit("tenths_above_9", "Tenths of a second must be 0 to 9", buf, len, WS_ERR_RECORD_INVALID);
+
+    rec = BASE;
     rec.flags = WS_FLAG_EVENT;
     len = build_invalid(buf, &rec);
     emit("event_with_spread", "Event record where min, mean and max differ", buf, len,

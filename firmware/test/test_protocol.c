@@ -8,24 +8,26 @@ static const ws_record_t EXAMPLE_RECORD = {
     .ts = 1792742400u, /* 2026-10-23 08:00:00 UTC */
     .t_mean = 1234, .t_min = 1210, .t_max = 1261,
     .rh_mean = 8150, .rh_min = 8090, .rh_max = 8220,
-    .n_temp = 60, .n_rh = 60, .flags = 0,
+    .temp_valid_pct = 100, .rh_valid_pct = 100, .flags = 0,
 };
 
 static const uint8_t EXAMPLE_FRAME[] = {
-    0x01, 0x00, 0x01, 0x00, 0x12, 0x04, 0x00, 0x00,
-    0x00, 0x14, 0xdb, 0x6a,
-    0xd2, 0x04, 0xba, 0x04, 0xed, 0x04,
-    0xd6, 0x1f, 0x9a, 0x1f, 0x1c, 0x20,
-    0x3c, 0x3c, 0x00,
-    0x08,
-    0xb7, 0x23,
+    0x01, 0x00, 0x01, 0x00, 0x12, 0x04, 0x00, 0x00, /* v1, live, 1 record, seq 1042 */
+    0x00, 0x14, 0xdb, 0x6a,                         /* ts 1792742400 */
+    0x00,                                           /* tenths 0 */
+    0xd2, 0x04, 0xba, 0x04, 0xed, 0x04,             /* temperature mean, min, max */
+    0xd6, 0x1f, 0x9a, 0x1f, 0x1c, 0x20,             /* humidity mean, min, max */
+    0x64, 0x64, 0x00,                               /* 100% valid, 100% valid, flags */
+    0x61,                                           /* record CRC-8 */
+    0x04, 0xa3,                                     /* frame CRC-16 */
 };
 
 static bool records_equal(const ws_record_t *a, const ws_record_t *b)
 {
-    return a->ts == b->ts && a->t_mean == b->t_mean && a->t_min == b->t_min &&
-           a->t_max == b->t_max && a->rh_mean == b->rh_mean && a->rh_min == b->rh_min &&
-           a->rh_max == b->rh_max && a->n_temp == b->n_temp && a->n_rh == b->n_rh &&
+    return a->ts == b->ts && a->tenths == b->tenths && a->t_mean == b->t_mean &&
+           a->t_min == b->t_min && a->t_max == b->t_max && a->rh_mean == b->rh_mean &&
+           a->rh_min == b->rh_min && a->rh_max == b->rh_max &&
+           a->temp_valid_pct == b->temp_valid_pct && a->rh_valid_pct == b->rh_valid_pct &&
            a->flags == b->flags;
 }
 
@@ -71,22 +73,23 @@ static void test_boundary_values_round_trip(void)
     const ws_record_t cases[] = {
         /* full sensor range */
         {.ts = 0, .t_mean = 0, .t_min = WS_TEMP_MIN, .t_max = WS_TEMP_MAX,
-         .rh_mean = 5000, .rh_min = 0, .rh_max = WS_RH_MAX, .n_temp = 60, .n_rh = 60},
-        /* largest timestamp, all defined flags */
-        {.ts = UINT32_MAX, .t_mean = -1, .t_min = -1, .t_max = -1, .rh_mean = 1, .rh_min = 1,
-         .rh_max = 1, .n_temp = 1, .n_rh = 1, .flags = 0x1F},
+         .rh_mean = 5000, .rh_min = 0, .rh_max = WS_RH_MAX, .temp_valid_pct = 100,
+         .rh_valid_pct = 1},
+        /* largest timestamp and tenths, all defined flags (so a change event) */
+        {.ts = UINT32_MAX, .tenths = 9, .t_mean = -1, .t_min = -1, .t_max = -1, .rh_mean = 1,
+         .rh_min = 1, .rh_max = 1, .temp_valid_pct = 100, .rh_valid_pct = 100, .flags = 0x1F},
         /* temperature sensor failed for the whole window */
         {.ts = 100, .t_mean = WS_TEMP_INVALID, .t_min = WS_TEMP_INVALID,
          .t_max = WS_TEMP_INVALID, .rh_mean = 4000, .rh_min = 3900, .rh_max = 4100,
-         .n_temp = 0, .n_rh = 60, .flags = WS_FLAG_TEMP_ERROR},
+         .temp_valid_pct = 0, .rh_valid_pct = 97, .flags = WS_FLAG_TEMP_ERROR},
         /* both sensors failed: still recorded, the station itself is alive */
         {.ts = 100, .t_mean = WS_TEMP_INVALID, .t_min = WS_TEMP_INVALID,
          .t_max = WS_TEMP_INVALID, .rh_mean = WS_RH_INVALID, .rh_min = WS_RH_INVALID,
          .rh_max = WS_RH_INVALID, .flags = WS_FLAG_TEMP_ERROR | WS_FLAG_RH_ERROR},
-        /* frost event: humidity sensor failed, temperature is enough */
-        {.ts = 200, .t_mean = 100, .t_min = 100, .t_max = 100, .rh_mean = WS_RH_INVALID,
-         .rh_min = WS_RH_INVALID, .rh_max = WS_RH_INVALID, .n_temp = 1, .n_rh = 0,
-         .flags = WS_FLAG_EVENT},
+        /* change event while the humidity sensor failed: temperature is enough */
+        {.ts = 200, .tenths = 3, .t_mean = 100, .t_min = 100, .t_max = 100,
+         .rh_mean = WS_RH_INVALID, .rh_min = WS_RH_INVALID, .rh_max = WS_RH_INVALID,
+         .temp_valid_pct = 100, .rh_valid_pct = 0, .flags = WS_FLAG_EVENT},
     };
 
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
@@ -109,30 +112,31 @@ static void test_invalid_records_are_refused(void)
         {"humidity above range", EXAMPLE_RECORD},
         {"min above mean", EXAMPLE_RECORD},
         {"mean above max", EXAMPLE_RECORD},
-        {"more samples than the window", EXAMPLE_RECORD},
-        {"no samples but values present", EXAMPLE_RECORD},
-        {"samples but sentinel values", EXAMPLE_RECORD},
+        {"more than 100% valid", EXAMPLE_RECORD},
+        {"0% valid but values present", EXAMPLE_RECORD},
+        {"valid but sentinel values", EXAMPLE_RECORD},
         {"event with spread", EXAMPLE_RECORD},
-        {"event with two samples", EXAMPLE_RECORD},
+        {"event only partly valid", EXAMPLE_RECORD},
         {"event with no readings", EXAMPLE_RECORD},
+        {"tenths above 9", EXAMPLE_RECORD},
     };
     cases[0].rec.t_max = WS_TEMP_MAX + 1;
     cases[1].rec.t_min = WS_TEMP_MIN - 1;
     cases[2].rec.rh_max = WS_RH_MAX + 1;
     cases[3].rec.t_min = 1300;
     cases[4].rec.rh_max = 8100;
-    cases[5].rec.n_temp = WS_WINDOW_SAMPLES + 1;
-    cases[6].rec.n_rh = 0;
+    cases[5].rec.temp_valid_pct = WS_VALID_PCT_MAX + 1;
+    cases[6].rec.rh_valid_pct = 0;
     cases[7].rec.t_mean = cases[7].rec.t_min = cases[7].rec.t_max = WS_TEMP_INVALID;
     cases[8].rec.flags = WS_FLAG_EVENT;
-    cases[8].rec.n_temp = cases[8].rec.n_rh = 1;
     cases[9].rec = (ws_record_t){.t_mean = 5, .t_min = 5, .t_max = 5, .rh_mean = 5,
-                                 .rh_min = 5, .rh_max = 5, .n_temp = 2, .n_rh = 1,
-                                 .flags = WS_FLAG_EVENT};
+                                 .rh_min = 5, .rh_max = 5, .temp_valid_pct = 50,
+                                 .rh_valid_pct = 100, .flags = WS_FLAG_EVENT};
     cases[10].rec = (ws_record_t){.t_mean = WS_TEMP_INVALID, .t_min = WS_TEMP_INVALID,
                                   .t_max = WS_TEMP_INVALID, .rh_mean = WS_RH_INVALID,
                                   .rh_min = WS_RH_INVALID, .rh_max = WS_RH_INVALID,
                                   .flags = WS_FLAG_EVENT};
+    cases[11].rec.tenths = 10;
 
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         uint8_t buf[WS_RECORD_SIZE];
@@ -158,7 +162,7 @@ static void test_reserved_bits_are_ignored(void)
 
     memcpy(frame, EXAMPLE_FRAME, sizeof frame);
     frame[1] = 0xFE;      /* frame_flags: every reserved bit set */
-    frame[8 + 18] = 0xE0; /* record flags: every reserved bit set */
+    frame[8 + 19] = 0xE0; /* record flags: every reserved bit set */
     reseal_record(&frame[8]);
     reseal_frame(frame, sizeof frame);
     CHECK_STATUS(ws_frame_decode(frame, sizeof frame, &decoded, NULL), WS_OK);
@@ -266,7 +270,7 @@ static void test_frame_encoder_guards(void)
     CHECK_STATUS(ws_frame_encode(0, 0, records, WS_FRAME_MAX_RECORDS, frame, sizeof frame, &len),
                  WS_OK);
     CHECK(len == WS_FRAME_MAX_SIZE);
-    CHECK(WS_FRAME_MAX_SIZE == 4010);
+    CHECK(WS_FRAME_MAX_SIZE == 4210);
     CHECK_STATUS(ws_frame_encode(0, 0, records, 2, frame, WS_FRAME_SIZE(2) - 1, &len),
                  WS_ERR_BUFFER);
     CHECK_STATUS(ws_frame_encode(0, 0, records, 1, NULL, 0, &len), WS_ERR_BUFFER);

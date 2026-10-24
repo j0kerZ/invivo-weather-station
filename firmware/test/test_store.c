@@ -17,7 +17,7 @@ static void make_record(uint32_t seq, uint8_t out[WS_RECORD_SIZE])
 {
     int16_t t = (int16_t)(seq % 10000);
     ws_record_t r = {.ts = T0 + 60 * seq, .t_mean = t, .t_min = t, .t_max = t,
-                     .rh_mean = 5000, .rh_min = 5000, .rh_max = 5000, .n_temp = 30, .n_rh = 30};
+                     .rh_mean = 5000, .rh_min = 5000, .rh_max = 5000, .temp_valid_pct = 100, .rh_valid_pct = 100};
     ws_record_encode(&r, out);
 }
 
@@ -169,15 +169,17 @@ static void test_works_without_service(void)
 }
 
 /*
- * Each sector takes exactly 4096 programmed bytes (header + 204 records), so sector changes, with
- * their header writes and erases, happen near multiples of 4096. Cut at every byte there, and at
- * every 7th byte elsewhere: 7 shares no factor with the 20-byte record, so the sweep still cuts
- * at every offset inside a record.
+ * Each sector takes exactly 16 + 194 × 21 = 4090 programmed bytes, so sector changes, with their
+ * header writes and erases, happen near multiples of 4090. Cut at every byte there, and at every
+ * 11th byte elsewhere: 11 shares no factor with the 21-byte record, so the sweep still cuts at
+ * every offset inside a record.
  */
+#define BYTES_PER_SECTOR (WS_STORE_HEADER_SIZE + WS_STORE_RECORDS_PER_SECTOR * WS_RECORD_SIZE)
+
 static bool interesting_cut(size_t cut)
 {
-    size_t from_boundary = cut % WS_FLASH_SECTOR_SIZE;
-    return from_boundary < 64 || from_boundary > WS_FLASH_SECTOR_SIZE - 64 || cut % 7 == 0;
+    size_t from_boundary = cut % BYTES_PER_SECTOR;
+    return from_boundary < 64 || from_boundary > BYTES_PER_SECTOR - 64 || cut % 11 == 0;
 }
 
 /*

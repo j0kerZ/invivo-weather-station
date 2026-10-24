@@ -16,9 +16,9 @@
 #define WS_PROTOCOL_VERSION 1u
 
 /* §4 Record */
-#define WS_RECORD_SIZE 20u
-#define WS_RECORD_CRC_OFFSET 19u
-#define WS_WINDOW_SAMPLES 60u /* most samples a 1-minute aggregate may contain (1 Hz) */
+#define WS_RECORD_SIZE 21u
+#define WS_RECORD_CRC_OFFSET 20u
+#define WS_VALID_PCT_MAX 100u /* "% of samples valid": whole percent, rounded down */
 
 #define WS_TEMP_MIN (-5500)          /* -55.00 °C */
 #define WS_TEMP_MAX 15000            /* 150.00 °C */
@@ -54,17 +54,19 @@ typedef enum {
 
 /* A record as the firmware works with it. The CRC exists only in the encoded form. */
 typedef struct {
-    uint32_t ts;
+    uint32_t ts;     /* Unix seconds */
+    uint8_t tenths;  /* 0..9: tenths of a second after ts */
     int16_t t_mean;
     int16_t t_min;
     int16_t t_max;
     uint16_t rh_mean;
     uint16_t rh_min;
     uint16_t rh_max;
-    uint8_t n_temp;
-    uint8_t n_rh;
+    uint8_t temp_valid_pct; /* % of the window's expected samples that were valid, 0..100 */
+    uint8_t rh_valid_pct;
     uint8_t flags;
 } ws_record_t;
+
 
 /* A validated frame. `records` points into the buffer passed to ws_frame_decode. */
 typedef struct {

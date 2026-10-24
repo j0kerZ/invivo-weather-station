@@ -13,7 +13,7 @@ the MCU, with emulated sensors, flash and clock.
 |---|---|
 | Binary protocol v1 ([docs/PROTOCOL.md](docs/PROTOCOL.md)) | Done |
 | C encoder/decoder with tests and shared test vectors | Done |
-| Sensor drivers, aggregation and events, PC emulator | Done |
+| Sensor drivers, minute summaries and change records, PC emulator | Done |
 | Flash storage with power-cut recovery | Done |
 | Publishing to AWS IoT Core (MQTT 5, X.509, backlog after outages) | Done |
 | Cloud ingest (Lambda, DynamoDB, IaC) | Not started |
@@ -38,7 +38,7 @@ Runs the real firmware against emulated sensors on an emulated I²C bus, faster 
 
 ```sh
 ./build/ws-emulator                         # a normal autumn day, with a rain shower at 13:00
-./build/ws-emulator --scenario frost        # a frost night: frost and thaw events
+./build/ws-emulator --scenario frost        # a frost night: sub-zero minimums
 ./build/ws-emulator --i2c-errors 0.05 --crc-errors 0.02   # a faulty sensor bus
 ./build/ws-emulator --hours 1 --hex         # also print each MQTT payload in hex
 
@@ -48,18 +48,19 @@ Runs the real firmware against emulated sensors on an emulated I²C bus, faster 
 ```
 
 ```
-2026-10-23T12:59:00Z  #780   AGG    T   19.94 /   20.05 /   20.13 °C   RH   51.51 /   51.88 /   52.18 %   n 30/30
-2026-10-23T13:00:34Z  #781   EVENT  T   19.25 °C   RH   57.88 %
-2026-10-23T13:00:00Z  #782   AGG    T   18.63 /   19.34 /   20.06 °C   RH   51.17 /   56.66 /   61.49 %   n 30/30
+2026-10-23T12:59:00.0Z  #780   MINUTE  T   19.94 /   20.06 /   20.19 °C   RH   51.76 /   51.84 /   51.90 %   valid 100%/100%
+2026-10-23T13:00:02.6Z  #781   CHANGE  T   20.00 °C   RH   52.28 %
+2026-10-23T13:00:05.3Z  #782   CHANGE  T   19.75 °C   RH   52.68 %
+2026-10-23T13:00:00.0Z  #805   MINUTE  T   18.50 /   19.32 /   20.13 °C   RH   51.80 /   56.78 /   61.76 %   valid 100%/100%
 ```
 
 ```mermaid
 flowchart LR
     subgraph portable["Portable firmware (runs on the Cortex-M3)"]
-        station["ws_station<br/>every 2 s"] --> lm92["LM92 driver"]
+        station["ws_station<br/>10 samples a second"] --> lm92["LM92 driver"]
         station --> hdc["HDC3020 driver"]
-        station --> agg["ws_aggregator<br/>1-min min/mean/max<br/>+ events"]
-        agg --> proto["ws_protocol<br/>20-byte record"]
+        station --> agg["ws_aggregator<br/>1-min min/mean/max<br/>+ changes (report by exception)"]
+        agg --> proto["ws_protocol<br/>21-byte record"]
         proto --> store["ws_store<br/>flash ring buffer<br/>365+ days"]
         store --> uplink["ws_uplink<br/>live + backlog<br/>upload cursor"]
         uplink --> mqttc["ws_mqtt<br/>coreMQTT v5"]
@@ -117,7 +118,7 @@ Then run the emulated station against AWS IoT Core:
 ```
     PUBACK #3 (live)   30 ms
 --- link down: simulated loss of signal ---
-2026-10-23T18:46:00Z  #4     AGG    T   17.75 /   17.84 /   17.94 °C   ...
+2026-10-23T18:46:00.0Z  #4     MINUTE  T   17.75 /   17.84 /   17.94 °C   ...
 --- connected to a3kt48ho2auteh-ats.iot.eu-north-1.amazonaws.com as station-001 (TLS + MQTT 224 ms) ---
     PUBACK #4-#6 (backfill, 3 records)   28 ms
     PUBACK #7 (live)   32 ms

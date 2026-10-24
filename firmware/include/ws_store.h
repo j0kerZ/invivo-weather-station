@@ -13,7 +13,7 @@
 #include "ws_protocol.h"
 
 #define WS_STORE_HEADER_SIZE 16u
-#define WS_STORE_RECORDS_PER_SECTOR 204u /* 16 + 204 * 20 = 4096 */
+#define WS_STORE_RECORDS_PER_SECTOR 194u /* (4096 - 16) / 21: 16 + 194 * 21 = 4090 */
 #define WS_STORE_SECTORS_16MB 4096u
 
 typedef enum {

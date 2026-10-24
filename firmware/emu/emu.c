@@ -11,7 +11,7 @@ static const double PI = 3.14159265358979323846;
 
 static emu_config_t config;
 static uint64_t rng_state;
-static uint32_t now;
+static double now; /* emulated Unix time in seconds, with tenths */
 
 /* ---- Deterministic randomness (xorshift64*): the same seed gives the same run ---- */
 
@@ -42,9 +42,9 @@ static double clamp(double v, double lo, double hi)
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-void emu_world_at(uint32_t ts, double *temp_c, double *rh_pct)
+void emu_world_at(double ts, double *temp_c, double *rh_pct)
 {
-    double hour = (double)(ts % 86400u) / 3600.0;
+    double hour = fmod(ts, 86400.0) / 3600.0;
     bool frost = config.scenario == EMU_SCENARIO_FROST;
     double mean = frost ? 3.0 : 14.0;
     double amplitude = frost ? 6.0 : 7.0;
@@ -76,6 +76,7 @@ static bool lm92_read(uint8_t *rx, size_t len)
     }
     double t, rh;
     emu_world_at(now, &t, &rh);
+    /* Temperature noise 0.05 °C: not from a datasheet (none found); quantised to 0.0625 °C. */
     long counts = lround((t + rng_gauss(0.05)) / 0.0625);
     uint16_t raw = (uint16_t)((uint32_t)(counts * 8) & 0xFFF8u); /* status bits 0 */
     rx[0] = (uint8_t)(raw >> 8);
@@ -96,7 +97,8 @@ static bool hdc_write(const uint8_t *tx, size_t len)
     double t, rh;
     emu_world_at(now, &t, &rh);
     hdc_t_raw = (uint16_t)lround(clamp((t + 45.0) / 175.0, 0.0, 1.0) * 65535.0);
-    hdc_rh_raw = (uint16_t)lround(clamp((rh + rng_gauss(0.2)) / 100.0, 0.0, 1.0) * 65535.0);
+    /* RH noise: ±0.02 %RH in low power mode 0 (TI HDC302x datasheet, Table 7-3). */
+    hdc_rh_raw = (uint16_t)lround(clamp((rh + rng_gauss(0.02)) / 100.0, 0.0, 1.0) * 65535.0);
     hdc_has_result = true;
     return true;
 }
@@ -162,17 +164,18 @@ void emu_init(const emu_config_t *cfg)
     hdc_has_result = false;
 }
 
-void emu_step(ws_station_t *st, uint32_t t)
+void emu_step(ws_station_t *st, uint32_t t, uint8_t tenths)
 {
-    now = t;
-    ws_station_tick(st, t, true);
+    now = (double)t + tenths / 10.0;
+    ws_station_tick(st, t, tenths, true);
 }
 
 bool emu_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
 {
     /* `<=` so the final window is closed by the first sample of the next one. */
-    for (uint32_t t = start; t - start <= duration_s; t += WS_SAMPLE_PERIOD_S) {
-        emu_step(st, t);
+    for (uint64_t i = 0; i <= (uint64_t)duration_s * WS_SAMPLE_HZ; i++) {
+        emu_step(st, start + (uint32_t)(i / WS_SAMPLE_HZ),
+                 (uint8_t)(i % WS_SAMPLE_HZ * 10u / WS_SAMPLE_HZ));
         if (emu_flash_is_dead()) {
             return false;
         }

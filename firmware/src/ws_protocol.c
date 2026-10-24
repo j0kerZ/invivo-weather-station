@@ -52,13 +52,14 @@ const char *ws_status_name(ws_status_t status)
  * One quantity's statistics (temperature or humidity), widened to int32 so the same check serves
  * the signed temperature and the unsigned humidity fields.
  */
-static bool stats_are_valid(uint8_t n, int32_t mean, int32_t min, int32_t max, int32_t invalid,
+static bool stats_are_valid(uint8_t pct, int32_t mean, int32_t min, int32_t max, int32_t invalid,
                             int32_t lo, int32_t hi, bool is_event)
 {
-    if (n == 0) {
+    if (pct == 0) {
         return mean == invalid && min == invalid && max == invalid;
     }
-    if (n > (is_event ? 1u : WS_WINDOW_SAMPLES)) {
+    /* A summary may be partly valid; a change event is one sample: valid or not. */
+    if (pct > WS_VALID_PCT_MAX || (is_event && pct != WS_VALID_PCT_MAX)) {
         return false;
     }
     if (min < lo || max > hi || min > mean || mean > max) {
@@ -71,13 +72,16 @@ bool ws_record_is_valid(const ws_record_t *rec)
 {
     bool is_event = (rec->flags & WS_FLAG_EVENT) != 0;
 
-    if (is_event && rec->n_temp == 0 && rec->n_rh == 0) {
+    if (rec->tenths > 9) {
+        return false;
+    }
+    if (is_event && rec->temp_valid_pct == 0 && rec->rh_valid_pct == 0) {
         return false; /* an event must carry at least one reading */
     }
-    return stats_are_valid(rec->n_temp, rec->t_mean, rec->t_min, rec->t_max, WS_TEMP_INVALID,
-                           WS_TEMP_MIN, WS_TEMP_MAX, is_event) &&
-           stats_are_valid(rec->n_rh, rec->rh_mean, rec->rh_min, rec->rh_max, WS_RH_INVALID, 0,
-                           WS_RH_MAX, is_event);
+    return stats_are_valid(rec->temp_valid_pct, rec->t_mean, rec->t_min, rec->t_max,
+                           WS_TEMP_INVALID, WS_TEMP_MIN, WS_TEMP_MAX, is_event) &&
+           stats_are_valid(rec->rh_valid_pct, rec->rh_mean, rec->rh_min, rec->rh_max,
+                           WS_RH_INVALID, 0, WS_RH_MAX, is_event);
 }
 
 ws_status_t ws_record_encode(const ws_record_t *rec, uint8_t out[WS_RECORD_SIZE])
@@ -86,15 +90,16 @@ ws_status_t ws_record_encode(const ws_record_t *rec, uint8_t out[WS_RECORD_SIZE]
         return WS_ERR_RECORD_INVALID;
     }
     put_u32le(&out[0], rec->ts);
-    put_u16le(&out[4], (uint16_t)rec->t_mean);
-    put_u16le(&out[6], (uint16_t)rec->t_min);
-    put_u16le(&out[8], (uint16_t)rec->t_max);
-    put_u16le(&out[10], rec->rh_mean);
-    put_u16le(&out[12], rec->rh_min);
-    put_u16le(&out[14], rec->rh_max);
-    out[16] = rec->n_temp;
-    out[17] = rec->n_rh;
-    out[18] = rec->flags;
+    out[4] = rec->tenths;
+    put_u16le(&out[5], (uint16_t)rec->t_mean);
+    put_u16le(&out[7], (uint16_t)rec->t_min);
+    put_u16le(&out[9], (uint16_t)rec->t_max);
+    put_u16le(&out[11], rec->rh_mean);
+    put_u16le(&out[13], rec->rh_min);
+    put_u16le(&out[15], rec->rh_max);
+    out[17] = rec->temp_valid_pct;
+    out[18] = rec->rh_valid_pct;
+    out[19] = rec->flags;
     out[WS_RECORD_CRC_OFFSET] = ws_crc8(out, WS_RECORD_CRC_OFFSET);
     return WS_OK;
 }
@@ -105,15 +110,16 @@ ws_status_t ws_record_decode(const uint8_t in[WS_RECORD_SIZE], ws_record_t *rec)
         return WS_ERR_RECORD_CRC;
     }
     rec->ts = get_u32le(&in[0]);
-    rec->t_mean = (int16_t)get_u16le(&in[4]);
-    rec->t_min = (int16_t)get_u16le(&in[6]);
-    rec->t_max = (int16_t)get_u16le(&in[8]);
-    rec->rh_mean = get_u16le(&in[10]);
-    rec->rh_min = get_u16le(&in[12]);
-    rec->rh_max = get_u16le(&in[14]);
-    rec->n_temp = in[16];
-    rec->n_rh = in[17];
-    rec->flags = in[18];
+    rec->tenths = in[4];
+    rec->t_mean = (int16_t)get_u16le(&in[5]);
+    rec->t_min = (int16_t)get_u16le(&in[7]);
+    rec->t_max = (int16_t)get_u16le(&in[9]);
+    rec->rh_mean = get_u16le(&in[11]);
+    rec->rh_min = get_u16le(&in[13]);
+    rec->rh_max = get_u16le(&in[15]);
+    rec->temp_valid_pct = in[17];
+    rec->rh_valid_pct = in[18];
+    rec->flags = in[19];
     return ws_record_is_valid(rec) ? WS_OK : WS_ERR_RECORD_INVALID;
 }
 

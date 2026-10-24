@@ -8,7 +8,7 @@ this document disagree, that is a bug.
 
 | Goal | Consequence |
 |---|---|
-| Fit 365 days of history in on-board flash | Fixed-size 20-byte record, 1-minute aggregation (§4) |
+| Fit 365 days of history in on-board flash | Fixed-size 21-byte record, 1-minute summaries (§4) |
 | Cloud receives new information within 1 s | Publish each record as soon as it is produced; publish threshold/change events immediately (§4) |
 | Cortex-M3 has no FPU | All values are fixed-point integers; no floats on the device |
 | Deterministic, portable encoding | Explicit little-endian, field-by-field serialization; never `memcpy` a C struct (padding and endianness are compiler-dependent) |
@@ -16,34 +16,17 @@ this document disagree, that is a bug.
 | Detect loss and duplicates | Monotonic 32-bit sequence number per station |
 | Evolve without breaking deployed devices | Version byte; decoders reject unknown versions instead of guessing |
 
-## 2. Sampling decision
+## 2. Sampling
 
-**Assumption (given by the interviewers):** the sensors respond to changes within a few
-milliseconds, and the sampling rate, up to about 100 Hz or much less, is ours to choose from the
-requirements.
+Assumption given for the exercise: the sensors respond to changes within milliseconds.
 
-We choose **one sample every 2 s, aggregated to one record per minute, plus immediate event
-records**, because the requirement is irrigation, not fast signals:
-
-- **Weather changes over minutes, even if the sensors are instant.** Irrigation decisions use
-  hourly or daily data (for example reference evapotranspiration).
-- **Real stations do the same.** The WMO standard reports air temperature as 1-minute averages.
-  Common farm stations such as the Davis Vantage Pro2 update every ~2.5 s; research and farm
-  networks sample every 5–15 s and keep 15-minute averages; commercial farm stations upload hourly.
-  2 s sampling with 1-minute records sits at the frequent end of real practice.
-- **100 Hz would cost 200× more** sensor reads, processing and power than 2 s, for no information
-  that matters to irrigation. Storage: 100 Hz raw data for a year would be about 31.5 GB per
-  station; 1-minute records are about 10.5 MB (§6).
-- **The 1 s delivery requirement is met by sending, not by sampling faster:** each record is
-  published as soon as it is produced, and events (such as frost) are published immediately.
-- The protocol allows up to 60 samples per window (1 Hz), so the rate can be raised later without a
-  protocol change.
-
-The individual samples are not discarded silently: each minute keeps **min, mean and max** for both
-quantities, so short extremes (for example a frost dip) survive aggregation.
-
-(For the real parts, 2 s is also comfortable: the LM92 datasheet gives a conversion time of up to
-1000 ms, and TI lists the HDC3020 humidity response as about 4 s.)
+- **10 samples per second.** The sample interval is the latency budget: at most 100 ms of the 1 s.
+- **One summary per minute** (lowest, mean, highest of every sample in the minute), the standard
+  meteorological output for air temperature.
+- **Report by exception:** a change record is sent as soon as a value moves at least 0.5 °C or
+  0.4 %RH from the last value sent; the band then re-centres on the new value. No rate limit
+  beyond the 100 ms sample interval.
+- The station stores the minute summaries; change records are alerts for the 1 s delivery path.
 
 ## 3. Conventions
 
@@ -58,30 +41,31 @@ quantities, so short extremes (for example a frost dip) survive aggregation.
   X.509 certificate and enforced by the IoT policy on the topic (§7). A payload cannot claim to be
   another station.
 
-## 4. Record (20 bytes)
+## 4. Record (21 bytes)
 
-One record is either a **1-minute aggregate** or an **event**. The same layout is used in flash and
+One record is either a **minute summary** or a **change**. The same layout is used in flash and
 on the wire, so the device copies stored records into a frame without re-encoding them.
 
 | Offset | Size | Type | Field | Meaning |
 |---:|---:|---|---|---|
-| 0 | 4 | u32 | `ts` | Aggregate: start of the 60 s window. Event: time of the sample |
-| 4 | 2 | i16 | `t_mean` | Mean temperature over valid samples, 0.01 °C |
-| 6 | 2 | i16 | `t_min` | Minimum temperature |
-| 8 | 2 | i16 | `t_max` | Maximum temperature |
-| 10 | 2 | u16 | `rh_mean` | Mean relative humidity, 0.01 %RH |
-| 12 | 2 | u16 | `rh_min` | Minimum relative humidity |
-| 14 | 2 | u16 | `rh_max` | Maximum relative humidity |
-| 16 | 1 | u8 | `n_temp` | Valid temperature samples in the window (0…60; 30 at the current 2 s rate; 1 for an event) |
-| 17 | 1 | u8 | `n_rh` | Valid humidity samples in the window (0…60; 30 at the current 2 s rate; 1 for an event) |
-| 18 | 1 | u8 | `flags` | See below |
-| 19 | 1 | u8 | `crc8` | CRC-8 over bytes 0…18 |
+| 0 | 4 | u32 | `ts` | Summary: start of the 60 s window. Change: time of the sample |
+| 4 | 1 | u8 | `tenths` | Tenths of a second after `ts`, 0…9 (0 for a summary) |
+| 5 | 2 | i16 | `t_mean` | Mean temperature over valid samples, 0.01 °C |
+| 7 | 2 | i16 | `t_min` | Minimum temperature |
+| 9 | 2 | i16 | `t_max` | Maximum temperature |
+| 11 | 2 | u16 | `rh_mean` | Mean relative humidity, 0.01 %RH |
+| 13 | 2 | u16 | `rh_min` | Minimum relative humidity |
+| 15 | 2 | u16 | `rh_max` | Maximum relative humidity |
+| 17 | 1 | u8 | `temp_valid_pct` | % of the window's 600 expected samples that were valid, 0…100, rounded down |
+| 18 | 1 | u8 | `rh_valid_pct` | Same for humidity |
+| 19 | 1 | u8 | `flags` | See below |
+| 20 | 1 | u8 | `crc8` | CRC-8 over bytes 0…19 |
 
 **Flags**
 
 | Bit | Name | Meaning |
 |---:|---|---|
-| 0 | `EVENT` | Record is an event (threshold crossing or significant change), not an aggregate |
+| 0 | `EVENT` | Record is a change, not a minute summary |
 | 1 | `TIME_UNSYNCED` | Device clock has not been synchronised since boot; `ts` is not trustworthy |
 | 2 | `TEMP_ERROR` | At least one temperature read failed during the window |
 | 3 | `RH_ERROR` | At least one humidity read failed (I²C error or sensor CRC mismatch) |
@@ -90,20 +74,11 @@ on the wire, so the device copies stored records into a frame without re-encodin
 
 **Rules**
 
-- If `n_temp == 0`, all three temperature fields are `0x8000`. Same for `n_rh == 0` and `0xFFFF`.
+- `tenths` ≤ 9; each valid % ≤ 100.
+- If a valid % is 0, that quantity's three fields are the no-data sentinel (`0x8000` for
+  temperature, `0xFFFF` for humidity). Fewer than 6 of 600 samples rounds down to 0%.
 - Otherwise `min ≤ mean ≤ max` and every value is inside its valid range.
-- An event record has `min == mean == max`, `n_temp, n_rh ≤ 1`, and at least one of them is 1.
-
-**Event triggers (device configuration, not part of the wire format)**
-
-- Frost: temperature falls to ≤ 1.00 °C, and later rises back to ≥ 1.50 °C. The 0.50 °C
-  hysteresis stops a reading hovering around 1 °C from producing an event every sample.
-- Temperature changes by ≥ 1.00 °C, or humidity by ≥ 5.00 %RH, since the last published value
-  (the previous event, or the mean of the previous aggregate).
-- At most one event per 10 s, so a noisy sensor cannot flood the link or the flash.
-- Triggers are evaluated against the last *published* state on every sample. An event suppressed by
-  the rate limit is therefore sent on the first sample after the limit expires, if the condition
-  still holds, without a queue of pending events.
+- A change record has `min == mean == max`, each valid % is 0 or 100, and at least one is 100.
 
 ## 5. Frame (MQTT payload)
 
@@ -117,8 +92,8 @@ on the wire, so the device copies stored records into a frame without re-encodin
 | 8 | 20 × `count` | | records | §4 |
 | 8 + 20 × `count` | 2 | u16 | `crc16` | CRC-16 over every preceding byte of the frame |
 
-- A live frame (one record) is **30 bytes**. The equivalent JSON is about 150 bytes.
-- The maximum frame is 4010 bytes, below AWS IoT Core's 5 KB billing increment.
+- A live frame (one record) is **31 bytes**.
+- The maximum frame is 4210 bytes, below AWS IoT Core's 5 KB billing unit ([AWS IoT Core pricing](https://aws.amazon.com/iot-core/pricing/)).
 - Records in one frame have consecutive sequence numbers. A device never puts a gap inside a frame.
 
 ## 6. Storage layout and capacity
@@ -132,20 +107,20 @@ On-board SPI NOR flash is used as a circular log of 4096-byte sectors (the NOR e
 | 8 | 4 | ring generation: how many times the log has wrapped (each sector is erased once per generation) |
 | 12 | 2 | reserved |
 | 14 | 2 | CRC-16 over bytes 0…13 |
-| 16 | 4080 | 204 records × 20 bytes |
+| 16 | 4074 | 194 records × 21 bytes |
 
-16 + 204 × 20 = 4096, so no record crosses a sector boundary.
+16 + 194 × 21 = 4090; the last 6 bytes of each sector are unused, so no record crosses a sector boundary.
 
 | Sampling | Records per year | Bytes per year | Flash needed |
 |---|---:|---:|---|
 | 100 Hz raw (10-byte samples) | 3.15 billion | 31.5 GB | Not feasible |
 | 1 Hz raw (10-byte samples) | 31.5 million | 315 MB | SD card |
-| **1-minute aggregate (this design)** | **525,600** | **10.5 MB** | **16 MB NOR** |
+| **1-minute summary (this design)** | **525,600** | **11.0 MB** | **16 MB NOR** |
 | 10-minute aggregate | 52,560 | 1.05 MB | Still exceeds Cortex-M3 internal flash (≤ 1 MB, shared with firmware) |
 
 A 16 MB part has 4096 sectors. The last 2 hold the upload cursor (§7). Of the remaining 4094,
-one is always kept erased ahead, leaving 4093 × 204 = 834,972 records: 365 days of aggregates
-plus room for about 840 events per day. An emulated year uses 2591 sectors.
+one is always kept erased ahead, leaving 4093 × 194 = 794,042 records. A year of minute summaries
+is 525,600 records, 2,710 sectors (66%).
 
 **Write order and crash safety.** NOR flash erases a whole sector to `0xFF`, and programming can
 only clear bits. Every step below leaves flash in a state the boot scan understands:
@@ -240,16 +215,17 @@ the future) is checked by the cloud, not the decoder, because it needs the recei
 
 A one-record live frame, sequence 1042, window starting 2026-10-23 08:00:00 UTC
 (`ts = 1792742400`). Temperature 12.10 / 12.34 / 12.61 °C (min/mean/max), humidity
-80.90 / 81.50 / 82.20 %RH, 60 valid samples of each, no flags.
+80.90 / 81.50 / 82.20 %RH, 100% of samples valid, no flags.
 
 ```
 01 00 01 00 12 04 00 00                          header: v1, live, 1 record, seq 1042
 00 14 db 6a                                      ts       1792742400
+00                                               tenths   0
 d2 04  ba 04  ed 04                              t_mean 1234, t_min 1210, t_max 1261
 d6 1f  9a 1f  1c 20                              rh_mean 8150, rh_min 8090, rh_max 8220
-3c 3c 00                                         n_temp 60, n_rh 60, flags 0
-08                                               crc8 0x08
-b7 23                                            crc16 0x23B7
+64 64 00                                         100% valid, 100% valid, flags 0
+61                                               crc8 0x61
+04 a3                                            crc16 0xA304
 ```
 
 ## 12. Versioning

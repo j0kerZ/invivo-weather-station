@@ -9,9 +9,10 @@ void ws_station_init(ws_station_t *st, uint32_t next_seq, const ws_event_config_
     ws_aggregator_init(&st->agg, cfg);
 }
 
-void ws_station_tick(ws_station_t *st, uint32_t now, bool time_synced)
+void ws_station_tick(ws_station_t *st, uint32_t now, uint8_t tenths, bool time_synced)
 {
-    ws_sample_t sample = {.ts = now, .flags = time_synced ? 0 : WS_FLAG_TIME_UNSYNCED};
+    ws_sample_t sample = {.ts = now, .tenths = tenths,
+                          .flags = time_synced ? 0 : WS_FLAG_TIME_UNSYNCED};
     int16_t hdc_temp; /* HDC3020 temperature: unused for now, kept for a future cross-check */
 
     /* LM92 is the temperature source of record; the HDC3020 provides humidity. */

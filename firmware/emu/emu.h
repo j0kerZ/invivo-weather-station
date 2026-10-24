@@ -28,7 +28,7 @@ typedef struct {
 void emu_init(const emu_config_t *cfg);
 
 /* The air conditions at a time, without sensor noise. */
-void emu_world_at(uint32_t ts, double *temp_c, double *rh_pct);
+void emu_world_at(double ts, double *temp_c, double *rh_pct);
 
 /*
  * Runs the station firmware from `start` for `duration_s` seconds of emulated time. Stops early,
@@ -36,8 +36,8 @@ void emu_world_at(uint32_t ts, double *temp_c, double *rh_pct);
  */
 bool emu_run(ws_station_t *st, uint32_t start, uint32_t duration_s);
 
-/* One station tick at emulated time t. */
-void emu_step(ws_station_t *st, uint32_t t);
+/* One station tick at emulated time t + tenths. */
+void emu_step(ws_station_t *st, uint32_t t, uint8_t tenths);
 
 /* ---- Emulated SPI NOR flash (emu_flash.c) ---- */
 

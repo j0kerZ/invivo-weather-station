@@ -5,8 +5,9 @@
  *   D15..D3  temperature, 13-bit two's complement, 0.0625 °C per count
  *   D2..D0   status bits (CRIT, HIGH, LOW): not temperature, masked off
  *
- * The LM92 converts continuously (500 ms typical, 1000 ms maximum). Reading faster than the
- * conversion time stops the value from updating; the station's 2 s polling stays clear of that.
+ * The real LM92 converts every 500 ms typical, 1000 ms maximum, and reading faster stops the value
+ * from updating. The exercise assumes sensors that respond within milliseconds, which the station's
+ * 10 Hz sampling relies on: a real build would need a faster temperature sensor.
  */
 
 #include "ws_hal.h"

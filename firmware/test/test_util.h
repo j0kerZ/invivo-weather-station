@@ -30,13 +30,14 @@ static inline void pack_record_unchecked(const ws_record_t *rec, uint8_t out[WS_
     for (size_t i = 0; i < 4; i++) {
         out[i] = (uint8_t)(rec->ts >> (8 * i));
     }
+    out[4] = rec->tenths;
     for (size_t i = 0; i < 6; i++) {
-        out[4 + 2 * i] = (uint8_t)fields[i];
-        out[5 + 2 * i] = (uint8_t)(fields[i] >> 8);
+        out[5 + 2 * i] = (uint8_t)fields[i];
+        out[6 + 2 * i] = (uint8_t)(fields[i] >> 8);
     }
-    out[16] = rec->n_temp;
-    out[17] = rec->n_rh;
-    out[18] = rec->flags;
+    out[17] = rec->temp_valid_pct;
+    out[18] = rec->rh_valid_pct;
+    out[19] = rec->flags;
     reseal_record(out);
 }
 

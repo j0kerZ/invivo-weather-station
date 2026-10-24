@@ -88,20 +88,21 @@ static void on_record(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SI
     char when[32];
     time_t t = (time_t)r.ts;
     struct tm tm;
-    strftime(when, sizeof when, "%Y-%m-%dT%H:%M:%SZ", gmtime_r(&t, &tm));
+    strftime(when, sizeof when, "%Y-%m-%dT%H:%M:%S", gmtime_r(&t, &tm));
 
-    printf("%s  #%-5lu %-5s", when, (unsigned long)seq, event ? "EVENT" : "AGG");
+    printf("%s.%uZ  #%-5lu %-6s", when, r.tenths, (unsigned long)seq,
+           event ? "CHANGE" : "MINUTE");
     if (event) {
-        print_pair("  T", r.t_mean, r.n_temp > 0, " °C");
-        print_pair("   RH", r.rh_mean, r.n_rh > 0, " %");
+        print_pair("  T", r.t_mean, r.temp_valid_pct > 0, " °C");
+        print_pair("   RH", r.rh_mean, r.rh_valid_pct > 0, " %");
     } else {
-        print_pair("  T", r.t_min, r.n_temp > 0, "");
-        print_pair(" /", r.t_mean, r.n_temp > 0, "");
-        print_pair(" /", r.t_max, r.n_temp > 0, " °C");
-        print_pair("   RH", r.rh_min, r.n_rh > 0, "");
-        print_pair(" /", r.rh_mean, r.n_rh > 0, "");
-        print_pair(" /", r.rh_max, r.n_rh > 0, " %");
-        printf("   n %2u/%2u", r.n_temp, r.n_rh);
+        print_pair("  T", r.t_min, r.temp_valid_pct > 0, "");
+        print_pair(" /", r.t_mean, r.temp_valid_pct > 0, "");
+        print_pair(" /", r.t_max, r.temp_valid_pct > 0, " °C");
+        print_pair("   RH", r.rh_min, r.rh_valid_pct > 0, "");
+        print_pair(" /", r.rh_mean, r.rh_valid_pct > 0, "");
+        print_pair(" /", r.rh_max, r.rh_valid_pct > 0, " %");
+        printf("   valid %3u%%/%3u%%", r.temp_valid_pct, r.rh_valid_pct);
     }
     if (r.flags & WS_FLAG_TEMP_ERROR) printf("  TEMP_ERROR");
     if (r.flags & WS_FLAG_RH_ERROR) printf("  RH_ERROR");
@@ -247,7 +248,7 @@ int main(int argc, char **argv)
     }
     if (online.station_id != NULL) {
         if (!start_given) {
-            start = (uint32_t)time(NULL) / WS_SAMPLE_PERIOD_S * WS_SAMPLE_PERIOD_S; /* real time */
+            start = (uint32_t)time(NULL); /* real time */
         }
     } else if (!start_given && resume_time(&store, &start)) {
         fprintf(stderr, "flash: resuming a minute after the newest stored record\n");
@@ -284,7 +285,7 @@ int main(int argc, char **argv)
         uint32_t before = (uint32_t)(cut_minutes * 60.0);
         emu_run(&st, start, before);
         emu_flash_power_cut_after(7);
-        emu_run(&st, start + before + WS_SAMPLE_PERIOD_S, duration - before);
+        emu_run(&st, start + before + 1, duration - before);
         fprintf(stderr, "\n*** power cut during a flash write (seq %lu) ***\n",
                 (unsigned long)(st.next_seq - 1));
     } else {
@@ -299,7 +300,7 @@ int main(int argc, char **argv)
     }
 
     fprintf(stderr,
-            "\n%lu aggregates, %lu events, %lu records with error flags, %lu bad frames\n"
+            "\n%lu minute summaries, %lu change events, %lu records with error flags, %lu bad frames\n"
             "sensor read failures: temperature %lu, humidity %lu; encode errors %lu; "
             "store errors %lu\n"
             "%zu bytes as live frames (%.1f bytes per record)\n",

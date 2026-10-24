@@ -74,7 +74,7 @@ static void record(station_t *s)
     uint8_t rec[WS_RECORD_SIZE];
     uint32_t seq = ws_store_next_seq(&s->store);
     ws_record_t r = {.ts = T0 + 60 * seq, .t_mean = 100, .t_min = 100, .t_max = 100,
-                     .rh_mean = 5000, .rh_min = 5000, .rh_max = 5000, .n_temp = 30, .n_rh = 30};
+                     .rh_mean = 5000, .rh_min = 5000, .rh_max = 5000, .temp_valid_pct = 100, .rh_valid_pct = 100};
     ws_record_encode(&r, rec);
     CHECK(ws_store_append(&s->store, seq, rec) == WS_STORE_OK);
     ws_uplink_record_stored(&s->up, seq, rec);

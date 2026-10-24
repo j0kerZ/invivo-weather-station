@@ -217,14 +217,16 @@ int online_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
 {
     uint32_t real_start = emu_now_ms();
 
-    for (uint32_t t = start; t - start <= duration_s; t += WS_SAMPLE_PERIOD_S) {
-        uint32_t due = real_start + (uint32_t)((double)(t - start) * 1000.0 / cfg.speed);
+    for (uint64_t i = 0; i <= (uint64_t)duration_s * WS_SAMPLE_HZ; i++) {
+        uint32_t elapsed_s = (uint32_t)(i / WS_SAMPLE_HZ);
+        uint32_t due = real_start + (uint32_t)((double)i * WS_SAMPLE_PERIOD_MS / cfg.speed);
         while ((int32_t)(emu_now_ms() - due) < 0) {
-            service(t - start);
+            service(elapsed_s);
             sleep_ms(2);
         }
-        emu_step(st, t); /* sample; a finished record is stored and published at once */
-        service(t - start);
+        /* sample; a finished record or change is stored and published at once */
+        emu_step(st, start + elapsed_s, (uint8_t)(i % WS_SAMPLE_HZ * 10u / WS_SAMPLE_HZ));
+        service(elapsed_s);
     }
 
     /* Let outstanding PUBACKs and the last backlog arrive. */
@@ -278,7 +280,8 @@ int online_authz_check(const char *other_station_id)
     size_t len;
     uint16_t id;
     ws_record_t r = {.ts = (uint32_t)time(NULL), .t_mean = 1234, .t_min = 1234, .t_max = 1234,
-                     .rh_mean = 5000, .rh_min = 5000, .rh_max = 5000, .n_temp = 1, .n_rh = 1,
+                     .rh_mean = 5000, .rh_min = 5000, .rh_max = 5000, .temp_valid_pct = 100,
+                     .rh_valid_pct = 100,
                      .flags = WS_FLAG_EVENT};
     ws_record_encode(&r, record);
     ws_frame_encode(0, 1, record, 1, frame, sizeof frame, &len);

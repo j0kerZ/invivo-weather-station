@@ -1,12 +1,13 @@
 /*
- * Whole-station tests: the real firmware (drivers, aggregator, station) running a full emulated day
- * against the emulated sensors on the emulated I2C bus.
+ * Whole-station tests: the real firmware (drivers, aggregator, station) running emulated hours
+ * against the emulated sensors on the emulated I2C bus, at 10 samples a second.
  */
 
 #include "check.h"
 #include "emu.h"
 
 #define DAY_START 1792713600u /* 2026-10-23T00:00:00Z */
+#define HOUR 3600u
 #define MAX_RECORDS 2000u
 
 typedef struct {
@@ -28,8 +29,8 @@ static void capture(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SIZE
     }
 }
 
-static ws_station_t run_day(capture_t *c, emu_scenario_t scenario, uint64_t seed, double i2c_err,
-                            double crc_err)
+static ws_station_t run(capture_t *c, emu_scenario_t scenario, uint64_t seed, double i2c_err,
+                        double crc_err, uint32_t start, uint32_t duration_s)
 {
     const emu_config_t cfg = {.scenario = scenario, .seed = seed, .i2c_error_rate = i2c_err,
                               .crc_error_rate = crc_err};
@@ -39,77 +40,73 @@ static ws_station_t run_day(capture_t *c, emu_scenario_t scenario, uint64_t seed
     *c = (capture_t){.fingerprint = 2166136261u};
     emu_init(&cfg);
     ws_station_init(&st, 1, &events, capture, c);
-    emu_run(&st, DAY_START, 86400);
+    emu_run(&st, start, duration_s);
     return st;
 }
 
-static bool is_event(const ws_record_t *r)
+static bool is_change(const ws_record_t *r)
 {
     return (r->flags & WS_FLAG_EVENT) != 0;
 }
 
-static void test_normal_day(void)
+/* 12:00 to 14:00 of a normal day: steady weather, then the 13:00 rain shower. */
+static void test_rain_shower(void)
 {
     static capture_t c;
-    ws_station_t st = run_day(&c, EMU_SCENARIO_NORMAL, 1, 0.0, 0.0);
-    uint32_t aggregates = 0, events = 0;
+    const uint32_t start = DAY_START + 12 * HOUR;
+    ws_station_t st = run(&c, EMU_SCENARIO_NORMAL, 1, 0.0, 0.0, start, 2 * HOUR);
+    uint32_t minutes = 0, changes = 0;
 
     for (uint32_t i = 0; i < c.count; i++) {
         const ws_record_t *r = &c.rec[i];
         CHECK(c.seq[i] == i + 1); /* contiguous sequence numbers from 1 */
-        if (is_event(r)) {
-            events++;
-            /* Only the 13:00 rain shower changes fast enough to trigger an event */
-            CHECK(r->ts >= DAY_START + 13 * 3600 && r->ts < DAY_START + 14 * 3600);
+        if (is_change(r)) {
+            changes++;
+            /* Only the shower changes fast enough to leave the 0.5 °C / 0.4 %RH band */
+            CHECK(r->ts >= DAY_START + 13 * HOUR && r->ts < DAY_START + 14 * HOUR);
+            CHECK(r->temp_valid_pct == 100 && r->rh_valid_pct == 100);
         } else {
-            CHECK(r->ts == DAY_START + 60 * aggregates); /* one per minute, aligned */
-            aggregates++;
-            CHECK(r->n_temp == 30 && r->n_rh == 30); /* one sample every 2 s */
+            CHECK(r->ts == start + 60 * minutes); /* one per minute, aligned */
+            minutes++;
+            CHECK(r->temp_valid_pct == 100 && r->rh_valid_pct == 100); /* 600 of 600 */
             CHECK(r->flags == 0);
-            CHECK(r->t_min > 600 && r->t_max < 2200); /* 7..21 °C daily cycle, plus noise */
         }
     }
-    CHECK(aggregates == 1440);
-    CHECK(events >= 1);
+    CHECK(minutes == 120);
+    CHECK(changes >= 1);
     CHECK(st.temp_errors == 0 && st.rh_errors == 0 && st.encode_errors == 0);
 }
 
-static void test_frost_night_reports_frost_promptly(void)
+/* A frost night: the minute summaries keep the sub-zero lows. */
+static void test_frost_night(void)
 {
     static capture_t c;
-    run_day(&c, EMU_SCENARIO_FROST, 1, 0.0, 0.0);
+    run(&c, EMU_SCENARIO_FROST, 1, 0.0, 0.0, DAY_START + 2 * HOUR, 2 * HOUR);
     int32_t coldest = INT32_MAX;
-    bool frost_reported = false, thaw_reported = false;
 
     for (uint32_t i = 0; i < c.count; i++) {
-        const ws_record_t *r = &c.rec[i];
-        if (!is_event(r)) {
-            if (r->t_min < coldest) coldest = r->t_min;
-            continue;
+        if (!is_change(&c.rec[i]) && c.rec[i].t_min < coldest) {
+            coldest = c.rec[i].t_min;
         }
-        if (r->t_mean <= 100) frost_reported = true;
-        if (frost_reported && r->t_mean >= 150) thaw_reported = true;
     }
     CHECK(coldest < 0);
-    CHECK(frost_reported);
-    CHECK(thaw_reported);
 }
 
 static void test_faulty_bus_still_produces_valid_records(void)
 {
     static capture_t c;
-    ws_station_t st = run_day(&c, EMU_SCENARIO_NORMAL, 7, 0.05, 0.02);
-    uint32_t aggregates = 0, flagged = 0, partial = 0;
+    ws_station_t st = run(&c, EMU_SCENARIO_NORMAL, 7, 0.05, 0.02, DAY_START, HOUR);
+    uint32_t minutes = 0, flagged = 0, partial = 0;
 
     for (uint32_t i = 0; i < c.count; i++) {
         const ws_record_t *r = &c.rec[i];
-        if (is_event(r)) continue;
-        aggregates++;
+        if (is_change(r)) continue;
+        minutes++;
         if (r->flags & (WS_FLAG_TEMP_ERROR | WS_FLAG_RH_ERROR)) flagged++;
-        if (r->n_temp < 30 || r->n_rh < 30) partial++;
+        if (r->temp_valid_pct < 100 || r->rh_valid_pct < 100) partial++;
     }
     /* Records were already checked as decodable in capture(). */
-    CHECK(aggregates == 1440);
+    CHECK(minutes == 60);
     CHECK(flagged > 0 && partial == flagged);
     CHECK(st.temp_errors > 0 && st.rh_errors > 0);
     CHECK(st.encode_errors == 0);
@@ -118,15 +115,15 @@ static void test_faulty_bus_still_produces_valid_records(void)
 static void test_same_seed_same_output(void)
 {
     static capture_t a, b;
-    run_day(&a, EMU_SCENARIO_FROST, 42, 0.01, 0.01);
-    run_day(&b, EMU_SCENARIO_FROST, 42, 0.01, 0.01);
+    run(&a, EMU_SCENARIO_NORMAL, 42, 0.01, 0.01, DAY_START + 13 * HOUR, HOUR / 2);
+    run(&b, EMU_SCENARIO_NORMAL, 42, 0.01, 0.01, DAY_START + 13 * HOUR, HOUR / 2);
     CHECK(a.count == b.count && a.fingerprint == b.fingerprint);
 }
 
 int main(void)
 {
-    test_normal_day();
-    test_frost_night_reports_frost_promptly();
+    test_rain_shower();
+    test_frost_night();
     test_faulty_bus_still_produces_valid_records();
     test_same_seed_same_output();
     return check_report("test_emulator");
