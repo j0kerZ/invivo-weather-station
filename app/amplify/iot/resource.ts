@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { Stack } from 'aws-cdk-lib';
 import * as iot from 'aws-cdk-lib/aws-iot';
 
-/** MQTT topics are `invivo-ws/{stationId}/telemetry` (docs/PROTOCOL.md §7). */
+/** MQTT topics are `invivo-ws/{stationId}/telemetry` (docs/PROTOCOL.md §6). */
 export const TOPIC_PREFIX = 'invivo-ws';
 
 export interface StationIdentity {
