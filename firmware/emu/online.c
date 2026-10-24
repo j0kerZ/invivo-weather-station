@@ -260,9 +260,15 @@ int online_run(ws_station_t *st, uint32_t start, uint32_t duration_s)
             (unsigned long long)emu_net_bytes_sent());
     if (n_rtt > 0) {
         qsort(rtt, n_rtt, sizeof rtt[0], compare_u32);
-        fprintf(stderr, "PUBACK round trip over %zu publishes: median %lu ms, p95 %lu ms, max %lu ms\n",
+        size_t within_1s = 0;
+        for (size_t i = 0; i < n_rtt; i++) {
+            within_1s += rtt[i] <= 1000;
+        }
+        fprintf(stderr, "PUBACK round trip over %zu publishes: median %lu ms, p95 %lu ms, p99 %lu ms, "
+                        "max %lu ms; within 1 s: %zu of %zu (%.1f%%)\n",
                 n_rtt, (unsigned long)percentile(0.5), (unsigned long)percentile(0.95),
-                (unsigned long)rtt[n_rtt - 1]);
+                (unsigned long)percentile(0.99), (unsigned long)rtt[n_rtt - 1], within_1s, n_rtt,
+                100.0 * (double)within_1s / (double)n_rtt);
     }
     return uplink.acked_through == last ? 0 : 1;
 }
