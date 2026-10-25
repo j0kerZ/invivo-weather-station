@@ -29,19 +29,24 @@ static void capture(void *ctx, uint32_t seq, const uint8_t record[WS_RECORD_SIZE
     }
 }
 
+static ws_station_t run_with(capture_t *c, const emu_config_t *cfg, uint32_t start, uint32_t duration_s)
+{
+    const ws_event_config_t events = WS_EVENT_CONFIG_DEFAULT;
+    ws_station_t st;
+
+    *c = (capture_t){.fingerprint = 2166136261u};
+    emu_init(cfg);
+    ws_station_init(&st, 1, &events, capture, c);
+    emu_run(&st, start, duration_s);
+    return st;
+}
+
 static ws_station_t run(capture_t *c, emu_scenario_t scenario, uint64_t seed, double i2c_err,
                         double crc_err, uint32_t start, uint32_t duration_s)
 {
     const emu_config_t cfg = {.scenario = scenario, .seed = seed, .i2c_error_rate = i2c_err,
                               .crc_error_rate = crc_err};
-    const ws_event_config_t events = WS_EVENT_CONFIG_DEFAULT;
-    ws_station_t st;
-
-    *c = (capture_t){.fingerprint = 2166136261u};
-    emu_init(&cfg);
-    ws_station_init(&st, 1, &events, capture, c);
-    emu_run(&st, start, duration_s);
-    return st;
+    return run_with(c, &cfg, start, duration_s);
 }
 
 static bool is_change(const ws_record_t *r)
@@ -76,6 +81,39 @@ static void test_rain_shower(void)
     CHECK(minutes == 120);
     CHECK(changes >= 1);
     CHECK(st.temp_errors == 0 && st.rh_errors == 0 && st.encode_errors == 0);
+}
+
+/* The shower can be moved (for a live demo): changes follow it, and 13:00 stays calm. */
+static void test_shower_can_be_moved(void)
+{
+    static capture_t c;
+    const emu_config_t cfg = {.scenario = EMU_SCENARIO_NORMAL, .seed = 1, .shower_shift_h = 9.5 - 13.0};
+    run_with(&c, &cfg, DAY_START + 9 * HOUR, 5 * HOUR);
+    uint32_t changes = 0;
+
+    for (uint32_t i = 0; i < c.count; i++) {
+        if (is_change(&c.rec[i])) {
+            changes++;
+            CHECK(c.rec[i].ts >= DAY_START + 9 * HOUR + 30 * 60 && c.rec[i].ts < DAY_START + 10 * HOUR + 30 * 60);
+        }
+    }
+    CHECK(changes >= 1);
+}
+
+/* A station's microclimate: the offset moves the temperature, and the colder air is more humid. */
+static void test_temperature_offset(void)
+{
+    const double ts = DAY_START + 15.0 * HOUR;
+    double t0, rh0, t1, rh1;
+    const emu_config_t plain = {.scenario = EMU_SCENARIO_NORMAL, .seed = 1};
+    const emu_config_t colder = {.scenario = EMU_SCENARIO_NORMAL, .seed = 1, .temp_offset_c = -2.0};
+
+    emu_init(&plain);
+    emu_world_at(ts, &t0, &rh0);
+    emu_init(&colder);
+    emu_world_at(ts, &t1, &rh1);
+    CHECK(t1 > t0 - 2.0 - 1e-9 && t1 < t0 - 2.0 + 1e-9);
+    CHECK(rh1 > rh0 + 6.0 - 1e-9 && rh1 < rh0 + 6.0 + 1e-9); /* 3 %RH per °C, as in the model */
 }
 
 /* A frost night: the minute summaries keep the sub-zero lows. */
@@ -124,6 +162,8 @@ static void test_same_seed_same_output(void)
 int main(void)
 {
     test_rain_shower();
+    test_shower_can_be_moved();
+    test_temperature_offset();
     test_frost_night();
     test_faulty_bus_still_produces_valid_records();
     test_same_seed_same_output();

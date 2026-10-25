@@ -160,6 +160,7 @@ static bool resume_time(const ws_store_t *store, uint32_t *start)
 static int usage(void)
 {
     fprintf(stderr, "usage: ws-emulator [--scenario normal|frost] [--hours N] [--start UNIX_TS]\n"
+                    "                   [--temp-offset C] [--shower-at HH:MM]\n"
                     "                   [--seed N] [--i2c-errors P] [--crc-errors P] [--hex] "
                     "[--quiet]\n"
                     "                   [--flash FILE] [--sectors N] [--power-cut-after MINUTES]\n"
@@ -237,6 +238,14 @@ int main(int argc, char **argv)
             }
         } else if (strcmp(arg, "--authz-check") == 0) {
             authz_other = val;
+        } else if (strcmp(arg, "--temp-offset") == 0) {
+            cfg.temp_offset_c = atof(val);
+        } else if (strcmp(arg, "--shower-at") == 0) {
+            unsigned hh = 0, mm = 0;
+            if (sscanf(val, "%u:%u", &hh, &mm) != 2 || hh > 23 || mm > 59) {
+                return usage();
+            }
+            cfg.shower_shift_h = hh + mm / 60.0 - 13.0; /* UTC */
         } else if (strcmp(arg, "--seed") == 0) {
             cfg.seed = strtoull(val, NULL, 10);
         } else if (strcmp(arg, "--i2c-errors") == 0) {

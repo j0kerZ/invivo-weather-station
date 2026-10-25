@@ -39,6 +39,8 @@ Runs the real firmware against emulated sensors on an emulated I²C bus, faster 
 ```sh
 ./build/ws-emulator                         # a normal autumn day, with a rain shower at 13:00
 ./build/ws-emulator --scenario frost        # a frost night: sub-zero minimums
+./build/ws-emulator --temp-offset -2        # a colder spot: 2 °C lower, more humid
+./build/ws-emulator --shower-at 09:30        # move the rain shower (UTC), e.g. into a live demo
 ./build/ws-emulator --i2c-errors 0.05 --crc-errors 0.02   # a faulty sensor bus
 ./build/ws-emulator --hours 1 --hex         # also print each MQTT payload in hex
 

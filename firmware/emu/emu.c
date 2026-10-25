@@ -49,15 +49,18 @@ void emu_world_at(double ts, double *temp_c, double *rh_pct)
     double mean = frost ? 3.0 : 14.0;
     double amplitude = frost ? 6.0 : 7.0;
 
-    /* Daily cycle: warmest at 15:00, coldest at 03:00. */
-    double base = mean + amplitude * cos(2.0 * PI * (hour - 15.0) / 24.0);
+    /* Daily cycle: warmest at 15:00, coldest at 03:00, shifted by the station's microclimate.
+     * A colder spot is also more humid (the humidity line below follows the temperature). */
+    double base = mean + config.temp_offset_c + amplitude * cos(2.0 * PI * (hour - 15.0) / 24.0);
 
-    /* Rain shower (normal scenario): 3 °C colder and 20 %RH wetter within 2 minutes of 13:00,
-     * recovering over 10 minutes from 13:30. Produces "large change" events. */
+    /* Rain shower (normal scenario): 3 °C colder and 20 %RH wetter within 2 minutes of 13:00
+     * (or as shifted), recovering over 10 minutes from half an hour later. Produces "large
+     * change" events. */
     double shower = 0.0;
     if (config.scenario == EMU_SCENARIO_NORMAL) {
-        double onset = clamp((hour - 13.0) * 30.0, 0.0, 1.0);       /* 2 min ramp */
-        double recovery = clamp((hour - 13.5) * 6.0, 0.0, 1.0);     /* 10 min ramp */
+        double since = fmod(hour - 13.0 - config.shower_shift_h + 48.0, 24.0); /* hours since onset */
+        double onset = clamp(since * 30.0, 0.0, 1.0);          /* 2 min ramp */
+        double recovery = clamp((since - 0.5) * 6.0, 0.0, 1.0); /* 10 min ramp */
         shower = onset * (1.0 - recovery);
     }
 

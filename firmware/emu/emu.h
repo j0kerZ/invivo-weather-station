@@ -14,7 +14,7 @@
 #include "ws_station.h"
 
 typedef enum {
-    EMU_SCENARIO_NORMAL, /* autumn day, 7..21 °C, rain shower at 13:00 */
+    EMU_SCENARIO_NORMAL, /* autumn day, 7..21 °C, rain shower at 13:00 UTC */
     EMU_SCENARIO_FROST,  /* cold night, -3..9 °C: frost from evening to morning */
 } emu_scenario_t;
 
@@ -23,6 +23,8 @@ typedef struct {
     uint64_t seed;
     double i2c_error_rate; /* probability that a sensor transaction is not acknowledged */
     double crc_error_rate; /* probability that an HDC3020 readout is corrupted on the bus */
+    double temp_offset_c;  /* the station's microclimate: added to the air temperature */
+    double shower_shift_h; /* moves the normal scenario's rain shower from 13:00 UTC */
 } emu_config_t;
 
 void emu_init(const emu_config_t *cfg);
