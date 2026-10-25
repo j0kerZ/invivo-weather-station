@@ -19,7 +19,7 @@ export function StationsTable({ stations, now, onOpen }: {
         <tbody>
           {[...stations].map(([id, readings]) => {
             const s = rangeStats(readings);
-            const online = isOnline(s.latest, now);
+            const online = isOnline(s.lastReceivedAt, now);
             return (
               <tr key={id} tabIndex={0} onClick={() => onOpen(id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(id)}>
                 <td><span className="swatch" style={{ background: colorOf(id) }} />{id}</td>
@@ -29,7 +29,7 @@ export function StationsTable({ stations, now, onOpen }: {
                 <td className="num">{formatTemp(s.latest?.wetBulb)}</td>
                 <td className="num">{formatTemp(s.tempMin)} / {formatTemp(s.tempMax)}</td>
                 <td className="num">{formatRh(s.rhMin)} / {formatRh(s.rhMax)}</td>
-                <td>{s.latest ? ageText(now - s.latest.receivedAt) : 'no data'}</td>
+                <td>{s.lastReceivedAt !== undefined ? ageText(now - s.lastReceivedAt) : 'no data'}</td>
               </tr>
             );
           })}

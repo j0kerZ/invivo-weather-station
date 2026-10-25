@@ -41,6 +41,12 @@ describe('farmNow', () => {
     expect(farmNow(stations, now)).toEqual({ online: 2, total: 4, tempAvg: 4, rhAvg: 70, coldest: { stationId: 'a', temp: 2 } });
   });
 
+  it('uses the reading taken last while a backlog upload delivers older readings later', () => {
+    const live = at('a', 10, 18, 55, now - 30_000);
+    const backlog = at('a', 0, 6, 90, now - 1_000); // a night-time reading, arriving after the live one
+    expect(farmNow(new Map([['a', [live, backlog]]]), now)).toMatchObject({ online: 1, tempAvg: 18, rhAvg: 55 });
+  });
+
   it('has no values when every station is offline', () => {
     expect(farmNow(new Map([['a', []]]), now)).toEqual({ online: 0, total: 1, tempAvg: undefined, rhAvg: undefined, coldest: undefined });
   });

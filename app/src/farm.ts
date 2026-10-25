@@ -3,7 +3,7 @@
  * station (PROTOCOL.md §2), so each minute has at most one value per station and averaging is
  * exact, with no resampling.
  */
-import { isOnline, newest, type Reading } from './readings';
+import { isOnline, lastReceivedAt, latest, type Reading } from './readings';
 
 const avg = (vs: number[]) => vs.reduce((s, v) => s + v, 0) / vs.length;
 const present = (vs: (number | null | undefined)[]) => vs.filter((v): v is number => v !== null && v !== undefined);
@@ -46,12 +46,12 @@ export interface FarmNow {
 
 /** The farm right now, from the stations that are online. */
 export function farmNow(stations: Map<string, Reading[]>, nowMs: number): FarmNow {
-  const latest = [...stations].map(([stationId, rs]) => ({ stationId, r: newest(rs) }))
-    .filter((s): s is { stationId: string; r: Reading } => s.r !== undefined && isOnline(s.r, nowMs));
-  const temps = latest.filter((s) => s.r.tempMean != null).map((s) => ({ stationId: s.stationId, temp: s.r.tempMean! }));
-  const rhs = present(latest.map((s) => s.r.rhMean));
+  const online = [...stations].filter(([, rs]) => isOnline(lastReceivedAt(rs), nowMs))
+    .map(([stationId, rs]) => ({ stationId, r: latest(rs)! }));
+  const temps = online.filter((s) => s.r.tempMean != null).map((s) => ({ stationId: s.stationId, temp: s.r.tempMean! }));
+  const rhs = present(online.map((s) => s.r.rhMean));
   return {
-    online: latest.length,
+    online: online.length,
     total: stations.size,
     tempAvg: temps.length ? avg(temps.map((t) => t.temp)) : undefined,
     rhAvg: rhs.length ? avg(rhs) : undefined,

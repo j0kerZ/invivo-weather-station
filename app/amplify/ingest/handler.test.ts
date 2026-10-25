@@ -136,24 +136,28 @@ describe('handler: writing to DynamoDB', () => {
     expect(db.batches.map((b) => b.length)).toEqual([3, 3, 1]);
   });
 
-  it('waits a random time, at most 100, 200 and 400 ms, before each retry', async () => {
+  it('waits a random time, at most 100, 200, 400 ms … capped at 2 s, before each retry', async () => {
     const waits: number[] = [];
     const sleep = async (ms: number) => { waits.push(ms); };
     for (const random of [() => 0.999999, () => 0.5, () => 0]) {
       const db = new FakeDb();
-      db.unprocessed = [1, 1, 1];
+      db.unprocessed = [1, 1, 1, 1, 1, 1];
       await makeHandler(db, 'Readings', { sleep, random })(eventFor(vectorHex('example_live')));
     }
-    expect(waits.map(Math.round)).toEqual([100, 200, 400, 50, 100, 200, 0, 0, 0]);
+    expect(waits.map(Math.round)).toEqual([
+      100, 200, 400, 800, 1600, 2000, // capped
+      50, 100, 200, 400, 800, 1000,
+      0, 0, 0, 0, 0, 0,
+    ]);
   });
 
-  it('fails after 4 attempts, so Lambda retries and then uses the failure queue', async () => {
+  it('fails after 7 attempts, so Lambda retries and then uses the failure queue', async () => {
     const db = new FakeDb();
-    db.unprocessed = [1, 1, 1, 1];
+    db.unprocessed = [1, 1, 1, 1, 1, 1, 1];
     await expect(makeHandler(db, 'Readings', { sleep: noSleep })(eventFor(vectorHex('example_live')))).rejects.toThrow(
-      '1 items not written after 4 attempts',
+      '1 items not written after 7 attempts',
     );
-    expect(db.batches).toHaveLength(4);
+    expect(db.batches).toHaveLength(7);
   });
 
   it('fails on a malformed frame without touching the table, and logs the reason', async () => {

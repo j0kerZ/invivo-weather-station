@@ -87,6 +87,7 @@ button.link { border: none; padding: 0; background: none; color: var(--series-1)
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 .tooltip { position: absolute; top: 4px; transform: translateX(8px); pointer-events: none; background: var(--surface);
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 0.8rem; white-space: nowrap; }
+.tooltip.flip { transform: translateX(calc(-100% - 8px)); } /* near the right edge: open to the left */
 
 .table-scroll { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }

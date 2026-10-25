@@ -58,8 +58,9 @@ export class FrameRejected extends Error {
 
 const STATION_ID = /^[a-z0-9-]{3,64}$/;
 const BATCH_SIZE = 25; // DynamoDB BatchWriteItem limit
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 7;
 const BACKOFF_BASE_MS = 50;
+const BACKOFF_CAP_MS = 2000;
 const FLAG_NAMES: [number, string][] = [
   [FLAG_TIME_UNSYNCED, 'TIME_UNSYNCED'],
   [FLAG_TEMP_ERROR, 'TEMP_ERROR'],
@@ -140,9 +141,10 @@ export function makeHandler(
   { sleep = (ms) => new Promise((r) => setTimeout(r, ms)), random = Math.random }: Timing = {},
 ) {
   /*
-   * Writes up to 25 items. DynamoDB may accept part of a batch under load; the rest is retried
-   * with exponential backoff and full jitter (a random wait up to 100, 200, 400 ms), so stations
-   * that reconnect together after an outage do not retry in lockstep.
+   * Writes up to 25 items. DynamoDB may accept part of a batch under load, for example while a
+   * station uploads its backlog into one partition; the rest is retried with exponential backoff
+   * and full jitter (a random wait up to 100, 200, 400 ms … capped at 2 s, about 5 s in all), so
+   * stations that reconnect together after an outage do not retry in lockstep.
    */
   async function writeBatch(items: ReadingItem[]): Promise<void> {
     let requests = items.map((Item) => ({ PutRequest: { Item } }));
@@ -151,7 +153,7 @@ export function makeHandler(
         /* Throwing makes Lambda retry the whole (idempotent) event, then use the failure queue. */
         throw new Error(`${requests.length} items not written after ${attempt} attempts`);
       }
-      if (attempt > 0) await sleep(random() * BACKOFF_BASE_MS * 2 ** attempt);
+      if (attempt > 0) await sleep(random() * Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt));
       const out = await db.send(new BatchWriteCommand({ RequestItems: { [tableName]: requests } }));
       requests = (out.UnprocessedItems?.[tableName] ?? []) as typeof requests;
     }

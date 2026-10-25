@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { reading } from './fixtures';
-import { ageText, delayMs, formatTemp, isOnline, mergeReadings, newest, OFFLINE_AFTER_MS, takenAtMs } from './readings';
+import { ageText, delayMs, formatTemp, isOnline, lastReceivedAt, latest, mergeReadings, OFFLINE_AFTER_MS, takenAtMs } from './readings';
 
 describe('time and delay', () => {
   it('takes a change at its tenth of a second, a summary at its minute start', () => {
@@ -15,10 +15,9 @@ describe('time and delay', () => {
 });
 
 describe('isOnline', () => {
-  const r = reading({ receivedAt: 1_000_000 });
   it('is online until two minutes without data', () => {
-    expect(isOnline(r, 1_000_000 + OFFLINE_AFTER_MS)).toBe(true);
-    expect(isOnline(r, 1_000_000 + OFFLINE_AFTER_MS + 1)).toBe(false);
+    expect(isOnline(1_000_000, 1_000_000 + OFFLINE_AFTER_MS)).toBe(true);
+    expect(isOnline(1_000_000, 1_000_000 + OFFLINE_AFTER_MS + 1)).toBe(false);
   });
   it('is offline with no reading at all', () => expect(isOnline(undefined, 0)).toBe(false));
 });
@@ -30,9 +29,13 @@ describe('mergeReadings', () => {
     const aAgain = reading({ sk: 'M#2', ts: 1792742460, receivedAt: 2 });
     expect(mergeReadings([a, b], [aAgain]).map((r) => [r.sk, r.receivedAt])).toEqual([['M#1', 1792742461123], ['M#2', 2]]);
   });
-  it('newest is the most recently received', () => {
-    expect(newest([reading({ sk: 'x', receivedAt: 5 }), reading({ sk: 'y', receivedAt: 9 })])?.sk).toBe('y');
-    expect(newest([])).toBeUndefined();
+  it('takes current values from the reading taken last, even when an older one arrived later', () => {
+    const live = reading({ sk: 'M#2', ts: 1792742460, receivedAt: 100 });
+    const backlog = reading({ sk: 'M#1', ts: 1792742400, receivedAt: 200 }); // uploaded after an outage
+    expect(latest([live, backlog])?.sk).toBe('M#2');
+    expect(lastReceivedAt([live, backlog])).toBe(200);
+    expect(latest([])).toBeUndefined();
+    expect(lastReceivedAt([])).toBeUndefined();
   });
 });
 

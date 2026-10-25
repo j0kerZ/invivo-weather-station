@@ -19,8 +19,9 @@ export const takenAtMs = (r: Reading): number => r.ts * 1000 + r.tenths * 100;
 export const delayMs = (r: Reading): number =>
   r.receivedAt - (r.kind === 'minute' ? (r.ts + 60) * 1000 : takenAtMs(r));
 
-export const isOnline = (latest: Reading | undefined, nowMs: number): boolean =>
-  latest !== undefined && nowMs - latest.receivedAt <= OFFLINE_AFTER_MS;
+/** Online: something arrived from the station in the last two minutes. */
+export const isOnline = (lastReceivedAtMs: number | undefined, nowMs: number): boolean =>
+  lastReceivedAtMs !== undefined && nowMs - lastReceivedAtMs <= OFFLINE_AFTER_MS;
 
 /* A reading's identity: the table key. sk alone repeats across stations. */
 const key = (r: Reading) => `${r.stationId}|${r.sk}`;
@@ -39,9 +40,16 @@ export function byStation(stationIds: readonly string[], readings: readonly Read
   return groups;
 }
 
-/** The most recently received reading, if any. */
-export const newest = (readings: readonly Reading[]): Reading | undefined =>
-  readings.reduce<Reading | undefined>((best, r) => (!best || r.receivedAt > best.receivedAt ? r : best), undefined);
+/*
+ * The current values: the reading taken last. Not the one received last: after an outage a
+ * station uploads its backlog, and old readings then arrive after newer ones.
+ */
+export const latest = (readings: readonly Reading[]): Reading | undefined =>
+  readings.reduce<Reading | undefined>((best, r) => (!best || takenAtMs(r) > takenAtMs(best) ? r : best), undefined);
+
+/** When anything last arrived from the station, for "online" and "updated … ago". */
+export const lastReceivedAt = (readings: readonly Reading[]): number | undefined =>
+  readings.length ? Math.max(...readings.map((r) => r.receivedAt)) : undefined;
 
 export function ageText(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -66,20 +74,22 @@ export const formatTime = (ms: number): string => timeFormat.format(ms);
 
 export interface RangeStats {
   latest?: Reading;
+  lastReceivedAt?: number;
   tempMin?: number;
   tempMax?: number;
   rhMin?: number;
   rhMax?: number;
 }
 
-/** One station over the range: its newest reading and the extremes of temperature and humidity. */
+/** One station over the range: its latest values, when it last sent, and the extremes. */
 export function rangeStats(readings: readonly Reading[]): RangeStats {
   const pick = (f: (r: Reading) => number | null | undefined) =>
     readings.map(f).filter((v): v is number => v !== null && v !== undefined);
   const lows = (f: (r: Reading) => number | null | undefined) => (pick(f).length ? Math.min(...pick(f)) : undefined);
   const highs = (f: (r: Reading) => number | null | undefined) => (pick(f).length ? Math.max(...pick(f)) : undefined);
   return {
-    latest: newest(readings),
+    latest: latest(readings),
+    lastReceivedAt: lastReceivedAt(readings),
     tempMin: lows((r) => r.tempMin),
     tempMax: highs((r) => r.tempMax),
     rhMin: lows((r) => r.rhMin),

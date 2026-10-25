@@ -1,5 +1,5 @@
 /* A station's latest values, how fresh they are, and whether it is online. */
-import { ageText, formatRh, formatTemp, isOnline, newest, type Reading } from '../readings';
+import { ageText, formatRh, formatTemp, isOnline, lastReceivedAt, latest, type Reading } from '../readings';
 import type { LiveState } from '../useLiveReadings';
 import { Empty, ErrorBox, Loading } from './Status';
 
@@ -10,8 +10,10 @@ export function StationCardView({ stationId, state, now, onOpen, onRetry }: {
   onOpen?: () => void; // absent on the station's own page
   onRetry: () => void;
 }) {
-  const latest: Reading | undefined = state.status === 'ready' ? newest(state.readings) : undefined;
-  const online = isOnline(latest, now);
+  const readings = state.status === 'ready' ? state.readings : [];
+  const current: Reading | undefined = latest(readings);
+  const received = lastReceivedAt(readings);
+  const online = isOnline(received, now);
   return (
     <article className="card">
       <header>
@@ -22,15 +24,15 @@ export function StationCardView({ stationId, state, now, onOpen, onRetry }: {
       </header>
       {state.status === 'loading' && <Loading what="latest reading" />}
       {state.status === 'error' && <ErrorBox message={state.message} onRetry={onRetry} />}
-      {state.status === 'ready' && !latest && <Empty message="No readings yet for this station." />}
-      {latest && (
+      {state.status === 'ready' && !current && <Empty message="No readings yet for this station." />}
+      {current && received !== undefined && (
         <>
           <dl className="values">
-            <div><dt>Temperature</dt><dd>{formatTemp(latest.tempMean)}</dd></div>
-            <div><dt>Humidity</dt><dd>{formatRh(latest.rhMean)}</dd></div>
-            <div><dt>Wet-bulb</dt><dd>{formatTemp(latest.wetBulb)}</dd></div>
+            <div><dt>Temperature</dt><dd>{formatTemp(current.tempMean)}</dd></div>
+            <div><dt>Humidity</dt><dd>{formatRh(current.rhMean)}</dd></div>
+            <div><dt>Wet-bulb</dt><dd>{formatTemp(current.wetBulb)}</dd></div>
           </dl>
-          <p className="muted">Updated {ageText(now - latest.receivedAt)}</p>
+          <p className="muted">Updated {ageText(now - received)}</p>
         </>
       )}
       {onOpen && <button type="button" onClick={onOpen}>Open station</button>}

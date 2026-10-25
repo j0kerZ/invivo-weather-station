@@ -60,7 +60,8 @@ export function LineChart({ title, series, measure, fromMs, toMs, band = false }
             height={g.plot.bottom - g.plot.top} onPointerMove={onMove} onPointerLeave={() => setHoverMs(undefined)} />
         </svg>
         {hovered.length > 0 && (
-          <div className="tooltip" style={{ left: `${(g.xOf(hovered[0].at) / SIZE.width) * 100}%` }}>
+          <div className={g.xOf(hovered[0].at) > SIZE.width * 0.6 ? 'tooltip flip' : 'tooltip'}
+            style={{ left: `${(g.xOf(hovered[0].at) / SIZE.width) * 100}%` }}>
             <div className="muted">{formatTime(hovered[0].at)}</div>
             {hovered.map((h) => (
               <div key={h.id}>
