@@ -12,6 +12,7 @@
       "$amplify/*": [
         "../.amplify/generated/*"
       ]
-    }
+    },
+    "allowJs": true
   }
 }

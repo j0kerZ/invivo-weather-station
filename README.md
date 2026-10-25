@@ -16,8 +16,13 @@ the MCU, with emulated sensors, flash and clock.
 | Sensor drivers, minute summaries and change records, PC emulator | Done |
 | Flash storage with power-cut recovery | Done |
 | Publishing to AWS IoT Core (MQTT 5, X.509, backlog after outages) | Done |
-| Cloud ingest (Lambda, DynamoDB, IaC) | Not started |
-| Web frontend | Not started |
+| Cloud ingest (IoT rule, Lambda, DynamoDB, failure queue, CDK) | Done |
+| Web dashboard (sign-in, farm overview, live updates) | Done |
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the firmware tests and the cloud tests on
+every push and pull request.
 
 ## Firmware: build and test
 
@@ -80,15 +85,15 @@ flowchart LR
 | `firmware/src`, `firmware/include` | Portable firmware code: no heap, no OS, no I/O, no floating point |
 | `firmware/emu` | PC-only: emulated LM92, HDC3020 and NOR flash (with power-cut injection), weather model, `ws-emulator` |
 | `firmware/test` | Unit tests, and a whole-station test over an emulated day |
-| `app/` | Amplify Gen 2 app: IoT identities now; ingest, API and dashboard next |
+| `app/` | Amplify Gen 2 app: IoT identities, ingestion; API and dashboard next |
 | `tools/station-credentials.sh` | Station key pair and CSR; fetches the signed certificate |
 | `firmware/tools/gen_vectors.c` | Generates `protocol/vectors-v1.json` |
 | `protocol/vectors-v1.json` | Valid and malformed frames with expected decode results, shared by every decoder |
 
 ## AWS IoT Core: device identity and publishing
 
-The cloud side is an AWS Amplify Gen 2 app in [`app/`](app/). Its backend currently holds only the
-station identities, written as plain CDK in [`app/amplify/iot/resource.ts`](app/amplify/iot/resource.ts):
+The cloud side is an AWS Amplify Gen 2 app in [`app/`](app/). The station identities are written as
+plain CDK in [`app/amplify/iot/resource.ts`](app/amplify/iot/resource.ts):
 one IoT thing and certificate per station, and one policy that lets a station connect only as its
 own thing and publish only to `invivo-ws/{its id}/telemetry`.
 
@@ -100,7 +105,7 @@ tools/station-credentials.sh create station-001
 tools/station-credentials.sh create station-002
 
 # 2. Deploy: AWS signs each CSR and creates things, certificates and the policy
-cd app && npm install && npx ampx sandbox --once --profile fs && cd ..
+cd app && npm install && WS_SENDER_EMAIL=<verified address> npx ampx sandbox --once --profile fs && cd ..
 
 # 3. Fetch the signed certificates and the account's IoT endpoint
 tools/station-credentials.sh fetch station-001
@@ -126,6 +131,18 @@ Then run the emulated station against AWS IoT Core:
     PUBACK #7 (live)   32 ms
 uplink: delivered through #10 of #10 (all)
 PUBACK round trip over 8 publishes: median 28 ms, p95 30 ms, max 32 ms
+```
+
+## Cloud and dashboard
+
+`app/amplify/`: IoT rule → ingest Lambda → DynamoDB (`ingest/`), GraphQL API and sign-in (`data/`,
+`auth/`). The dashboard is in `app/src/`. Sign-in codes are sent with SES from an address that SES
+has verified; users are created by an administrator.
+
+```sh
+cd app && npm test
+WS_SENDER_EMAIL=<verified address> npx ampx sandbox --once --profile fs
+npm run dev
 ```
 
 Remove everything again with `cd app && npx ampx sandbox delete --profile fs`.
