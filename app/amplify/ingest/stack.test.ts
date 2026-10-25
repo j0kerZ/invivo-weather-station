@@ -79,6 +79,7 @@ describe('ingestion stack', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
       BillingMode: 'PAY_PER_REQUEST',
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      StreamSpecification: { StreamViewType: 'NEW_IMAGE' }, // feeds the live dashboard
       /* Still encrypted: false selects the AWS-owned key instead of a KMS key in our account. */
       SSESpecification: { SSEEnabled: false },
     });

@@ -105,7 +105,7 @@ tools/station-credentials.sh create station-001
 tools/station-credentials.sh create station-002
 
 # 2. Deploy: AWS signs each CSR and creates things, certificates and the policy
-cd app && npm install && npx ampx sandbox --once --profile fs && cd ..
+cd app && npm install && WS_SENDER_EMAIL=<verified address> npx ampx sandbox --once --profile fs && cd ..
 
 # 3. Fetch the signed certificates and the account's IoT endpoint
 tools/station-credentials.sh fetch station-001
@@ -135,11 +135,13 @@ PUBACK round trip over 8 publishes: median 28 ms, p95 30 ms, max 32 ms
 
 ## Cloud
 
-`app/amplify/`: IoT rule → ingest Lambda → DynamoDB (`ingest/`).
+`app/amplify/`: IoT rule → ingest Lambda → DynamoDB (`ingest/`), GraphQL API and sign-in (`data/`,
+`auth/`). Sign-in codes are sent with SES from an address that SES has verified; users are created
+by an administrator.
 
 ```sh
 cd app && npm test
-npx ampx sandbox --once --profile fs
+WS_SENDER_EMAIL=<verified address> npx ampx sandbox --once --profile fs
 ```
 
 Remove everything again with `cd app && npx ampx sandbox delete --profile fs`.

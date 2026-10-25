@@ -25,6 +25,7 @@ export function createIngestion(stack: Stack) {
     billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
     encryption: dynamodb.TableEncryption.DEFAULT, // AWS-owned key: weather readings are not personal data
     pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    stream: dynamodb.StreamViewType.NEW_IMAGE, // stored readings, for live dashboard updates
     removalPolicy: RemovalPolicy.DESTROY,
   });
 
