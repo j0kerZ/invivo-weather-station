@@ -65,7 +65,8 @@ const schema = a.schema({
       stationId: a.string().required(),
       items: a.json().required(),
     })
-    .returns(a.ref('ReadingBatch').required())
+    /* Nullable: onReadings inherits this type, and its resolver returns null when a client subscribes. */
+    .returns(a.ref('ReadingBatch'))
     /*
      * No user may call this: "SystemOnly" is a group nobody is added to. The notify function gets
      * in through IAM (schema rule below), which Amplify authorizes by IAM policy, not these rules.

@@ -17,7 +17,7 @@ the MCU, with emulated sensors, flash and clock.
 | Flash storage with power-cut recovery | Done |
 | Publishing to AWS IoT Core (MQTT 5, X.509, backlog after outages) | Done |
 | Cloud ingest (IoT rule, Lambda, DynamoDB, failure queue, CDK) | Done |
-| Web frontend | Not started |
+| Web dashboard (sign-in, farm overview, live updates) | Done |
 
 ## Continuous integration
 
@@ -133,15 +133,16 @@ uplink: delivered through #10 of #10 (all)
 PUBACK round trip over 8 publishes: median 28 ms, p95 30 ms, max 32 ms
 ```
 
-## Cloud
+## Cloud and dashboard
 
 `app/amplify/`: IoT rule → ingest Lambda → DynamoDB (`ingest/`), GraphQL API and sign-in (`data/`,
-`auth/`). Sign-in codes are sent with SES from an address that SES has verified; users are created
-by an administrator.
+`auth/`). The dashboard is in `app/src/`. Sign-in codes are sent with SES from an address that SES
+has verified; users are created by an administrator.
 
 ```sh
 cd app && npm test
 WS_SENDER_EMAIL=<verified address> npx ampx sandbox --once --profile fs
+npm run dev
 ```
 
 Remove everything again with `cd app && npx ampx sandbox delete --profile fs`.
